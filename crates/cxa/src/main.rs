@@ -11,8 +11,10 @@ use std::sync::Arc;
 const HELP: &str = "cxa — Conversational Agents platform (Rust)
 
 USAGE:
-  cxa serve [--addr HOST:PORT] [--data FILE | --memory] [--api-key KEY] [--seed AGENT.json ...]
+  cxa serve [--addr HOST:PORT] [--data FILE | --memory] [--api-key KEY] [--public-sessions] [--seed AGENT ...]
       Run the multi-tenant platform: REST API under /v3 and the web console at /projects.
+      Environment fallbacks: PORT (listens on 0.0.0.0:$PORT), CXA_ADDR, CXA_DATA, CXA_MEMORY=1,
+      CXA_API_KEY, CXA_PUBLIC_SESSIONS=1, CXA_SEED=a.json,b.zip
   cxa chat AGENT [--say TEXT ...] [--debug]
       Talk to an agent: a bundle (.json), a Google export (.zip/.blob) or an unzipped JSON-package directory.
   cxa test AGENT
@@ -109,41 +111,39 @@ fn main() -> ExitCode {
     }
 }
 
+fn env_nonempty(k: &str) -> Option<String> {
+    std::env::var(k).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty())
+}
+
+fn env_flag(k: &str) -> bool {
+    env_nonempty(k).map_or(false, |v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+}
+
+/// `serve` options: flags win, then environment variables (for containers
+/// and Cloud Run), then defaults.
 fn serve(args: &[String]) -> Result<bool, String> {
-    let addr = arg_value(args, "--addr").unwrap_or_else(|| "127.0.0.1:8080".into());
-    let data_file = if args.iter().any(|a| a == "--memory") {
+    let addr = arg_value(args, "--addr")
+        .or_else(|| env_nonempty("CXA_ADDR"))
+        .or_else(|| env_nonempty("PORT").map(|p| format!("0.0.0.0:{}", p)))
+        .unwrap_or_else(|| "127.0.0.1:8080".into());
+    let memory = args.iter().any(|a| a == "--memory") || env_flag("CXA_MEMORY");
+    let data_file = if memory {
         None
     } else {
-        Some(PathBuf::from(arg_value(args, "--data").unwrap_or_else(|| "data/cxa-state.json".into())))
+        Some(PathBuf::from(arg_value(args, "--data").or_else(|| env_nonempty("CXA_DATA")).unwrap_or_else(|| "data/cxa-state.json".into())))
     };
-    let seeds = arg_values(args, "--seed");
-    if !seeds.is_empty() {
-        // seed agents into project "demo" if not present
-        let store = cx_server::store::Store::open(data_file.clone())?;
-        {
-            let mut d = store.data.lock().unwrap();
-            if d.get("projects/demo").is_none() {
-                d.put("projects/demo", obj! {"name" => "projects/demo", "displayName" => "Demo", "createTime" => cx_core::time::now_rfc3339()});
-            }
-            for s in &seeds {
-                let raw = load_raw(s)?;
-                let name = format!("projects/demo/locations/global/agents/{}", slug(raw.at("agent").str("displayName")));
-                if d.get(&name).is_none() {
-                    let mut n = normalize_bundle(&raw, &name);
-                    let mut a = n.at("agent").clone();
-                    a.set("createTime", cx_core::time::now_rfc3339());
-                    n.set("agent", a);
-                    cx_server::store::restore(&mut d, &name, &n);
-                    eprintln!("seeded agent {}", name);
-                }
-            }
-            store.persist(&d);
-        }
-        if data_file.is_none() {
-            return Err("--seed with --memory is not supported; use --data".into());
-        }
+    let mut seed_paths = arg_values(args, "--seed");
+    if let Some(list) = env_nonempty("CXA_SEED") {
+        seed_paths.extend(list.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()));
     }
-    cx_server::run(cx_server::Config { addr, data_file, runtime: runtime(), api_key: arg_value(args, "--api-key") })?;
+    let mut seeds = Vec::new();
+    for s in &seed_paths {
+        let raw = load_raw(s)?;
+        seeds.push((slug(raw.at("agent").str("displayName")), raw));
+    }
+    let api_key = arg_value(args, "--api-key").or_else(|| env_nonempty("CXA_API_KEY"));
+    let public_sessions = args.iter().any(|a| a == "--public-sessions") || env_flag("CXA_PUBLIC_SESSIONS");
+    cx_server::run(cx_server::Config { addr, data_file, runtime: runtime(), api_key, public_sessions, seeds })?;
     Ok(true)
 }
 

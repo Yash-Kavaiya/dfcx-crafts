@@ -1,0 +1,144 @@
+name: Deploy to Cloud Run
+
+# Builds the container, pushes it to Artifact Registry and deploys it to
+# Cloud Run on every push to main (and on demand). Authentication uses
+# Workload Identity Federation — no service-account keys are stored.
+#
+# One-time setup: run deploy/gcp-setup.sh in Cloud Shell, then add the
+# repository variables it prints (Settings → Secrets and variables →
+# Actions → Variables). Until GCP_PROJECT_ID is set, the deploy job is
+# skipped and only the tests run. See docs/deploy-cloud-run.md.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-cloud-run
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  SERVICE: ${{ vars.CLOUD_RUN_SERVICE || 'cxa' }}
+  REPOSITORY: ${{ vars.ARTIFACT_REPOSITORY || 'cxa' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo test --workspace --locked
+      - run: |
+          for a in examples/*.json; do cargo run -q --locked -p cxa -- test "$a"; done
+
+  deploy:
+    needs: test
+    if: ${{ vars.GCP_PROJECT_ID != '' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push image
+        id: image
+        run: |
+          IMAGE="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPOSITORY}/${SERVICE}:${GITHUB_SHA}"
+          gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloud Run
+        id: deploy
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          RUNTIME_SA: ${{ vars.GCP_RUNTIME_SERVICE_ACCOUNT }}
+          BUCKET: ${{ vars.GCS_BUCKET }}
+          API_KEY_SECRET: ${{ vars.API_KEY_SECRET }}
+          PUBLIC_SESSIONS: ${{ vars.PUBLIC_SESSIONS || '1' }}
+          SEED: ${{ vars.CXA_SEED || '/app/examples/pizza-agent.json,/app/examples/help-center-agent.json,/app/examples/travel-playbook-agent.json' }}
+          LLM_URL: ${{ vars.CXA_LLM_URL }}
+          LLM_MODEL: ${{ vars.CXA_LLM_MODEL }}
+        run: |
+          # '^@^' switches gcloud's list delimiter so values may contain commas.
+          ENV_VARS="^@^CXA_SEED=${SEED}@CXA_PUBLIC_SESSIONS=${PUBLIC_SESSIONS}"
+          [ -n "$LLM_URL" ] && ENV_VARS="${ENV_VARS}@CXA_LLM_URL=${LLM_URL}@CXA_LLM_MODEL=${LLM_MODEL}"
+          ARGS=(
+            run deploy "$SERVICE"
+            --image "$IMAGE"
+            --region "$REGION"
+            --platform managed
+            --port 8080
+            --allow-unauthenticated
+            # The store is a single JSON document: one writer instance.
+            --max-instances 1
+            --min-instances 0
+            --cpu 1
+            --memory 512Mi
+            --concurrency 80
+            --timeout 300
+            --execution-environment gen2
+            --set-env-vars "$ENV_VARS"
+            --quiet
+          )
+          [ -n "$RUNTIME_SA" ] && ARGS+=(--service-account "$RUNTIME_SA")
+          if [ -n "$BUCKET" ]; then
+            # Persist /data (the platform state) in a Cloud Storage bucket.
+            ARGS+=(--add-volume "name=data,type=cloud-storage,bucket=${BUCKET}"
+                   --add-volume-mount "volume=data,mount-path=/data")
+          else
+            echo "::warning::GCS_BUCKET is not set: platform data is lost when the instance restarts."
+          fi
+          if [ -n "$API_KEY_SECRET" ]; then
+            ARGS+=(--set-secrets "CXA_API_KEY=${API_KEY_SECRET}:latest")
+          else
+            echo "::warning::API_KEY_SECRET is not set: the management API is open to anyone with the URL."
+          fi
+          gcloud "${ARGS[@]}"
+          URL=$(gcloud run services describe "$SERVICE" --region "$REGION" --format 'value(status.url)')
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "### Deployed :rocket:" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Console: ${URL}/projects" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Image: \`${IMAGE}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Smoke test
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+          API_KEY_SECRET: ${{ vars.API_KEY_SECRET }}
+          PUBLIC_SESSIONS: ${{ vars.PUBLIC_SESSIONS || '1' }}
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 10); do
+            curl -fsS "$URL/healthz" && break
+            sleep 3
+          done
+          curl -fsS "$URL/v3/serverInfo"
+          curl -fsS "$URL/projects" -o /dev/null
+          curl -fsS "$URL/messenger.js" -o /dev/null
+          if [ -n "$API_KEY_SECRET" ] && [ "$PUBLIC_SESSIONS" != "1" ]; then
+            echo "Sessions require the API key; skipping the chat check."
+            exit 0
+          fi
+          # The seeded demo agent answers (sessions are public by default).
+          REPLY=$(curl -fsS -X POST "$URL/v3/projects/demo/locations/global/agents/rusty-pizza/sessions/ci-smoke:detectIntent" \
+            -H 'Content-Type: application/json' \
+            -d '{"queryInput":{"text":{"text":"hi"},"languageCode":"en"}}')
+          echo "$REPLY" | grep -q "Rusty Pizza" || { echo "unexpected reply: $REPLY"; exit 1; }
+          echo "Smoke test passed: $URL"

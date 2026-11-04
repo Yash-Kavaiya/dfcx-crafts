@@ -25,9 +25,29 @@ function toast(msg, err) {
   const t = $('#toast'); t.textContent = msg; t.className = 'toast' + (err ? ' err' : '');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add('hidden'), err ? 6000 : 2500);
 }
-async function call(method, path, body, query) {
+// API key handling: servers started with --api-key / CXA_API_KEY answer 401
+// until the console sends the key (kept in this browser only).
+const KEY = 'cxa-api-key';
+const getKey = () => { try { return localStorage.getItem(KEY) || ''; } catch (e) { return S.memKey || ''; } };
+const setKey = k => { try { k ? localStorage.setItem(KEY, k) : localStorage.removeItem(KEY); } catch (e) { S.memKey = k; } };
+let keyPrompt = null;
+function askForKey(message) {
+  if (keyPrompt) return keyPrompt;
+  const input = h('input', { type: 'password', placeholder: 'API key', autocomplete: 'current-password' });
+  keyPrompt = modal('API key required', h('div', null, h('p', { class: 'muted', style: 'margin-top:0' }, message || 'This server requires an API key. It is stored only in this browser.'), input),
+    [['Sign in', 'primary', () => input.value.trim() || toast('Enter the API key', true) && false]]).then(v => { keyPrompt = null; if (v) setKey(input.value.trim()); return !!v; });
+  return keyPrompt;
+}
+async function call(method, path, body, query, attempt = 0) {
   const qs = query ? '?' + new URLSearchParams(query) : '';
-  const r = await fetch('/v3/' + path + qs, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const headers = { 'Content-Type': 'application/json' };
+  const key = getKey(); if (key) headers.Authorization = 'Bearer ' + key;
+  const r = await fetch('/v3/' + path + qs, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  if (r.status === 401 && attempt < 3) {
+    if (key) setKey('');
+    if (await askForKey(key ? 'That API key was rejected. Enter a valid key.' : undefined)) return call(method, path, body, query, attempt + 1);
+    throw new Error('API key required');
+  }
   const text = await r.text();
   const data = text ? JSON.parse(text) : {};
   if (!r.ok) throw new Error((data.error && data.error.message) || r.statusText);
@@ -119,6 +139,10 @@ window.addEventListener('hashchange', render);
 window.addEventListener('load', () => {
   if (!location.hash && location.pathname !== '/' && location.pathname.startsWith('/projects')) location.hash = '#' + location.pathname;
   $('#toggle-sim').onclick = () => { S.sim.open = !S.sim.open; renderSim(); };
+  fetch('/v3/serverInfo').then(r => r.json()).then(info => {
+    S.serverInfo = info;
+    if (info.apiKeyRequired) $('.topbar').append(h('button', { class: 'btn ghost small', title: 'Forget the API key stored in this browser', onclick: () => { setKey(''); toast('Signed out'); render(); } }, 'Sign out'));
+  }).catch(() => { });
   render();
 });
 
@@ -920,6 +944,7 @@ async function integrationsSection(ctx, rest, main) {
   const copy = el => h('button', { class: 'btn small', onclick: async () => { try { await navigator.clipboard.writeText(el.textContent); toast('Copied'); } catch (e) { toast('Copy failed — select the text manually', true); } } }, 'Copy');
   main.append(h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, 'Web messenger'), h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Environment'), sel([['', 'Draft'], ...envs.map(e => [e.name, e.displayName])], '', v => { env = v; draw(); }))),
     h('p', { class: 'muted' }, 'Paste this snippet into any web page to add a chat bubble. It supports text and rich content payloads (chips, buttons, info cards, images).'),
+    S.serverInfo && S.serverInfo.apiKeyRequired && !S.serverInfo.publicSessions ? h('p', { class: 'chip warn' }, 'This server requires an API key for all calls. Start it with --public-sessions (CXA_PUBLIC_SESSIONS=1) so the widget can chat without exposing your key.') : null,
     snippet, h('div', { class: 'row' }, copy(snippet), demo)));
   main.append(h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'REST API'), h('p', { class: 'muted' }, 'Call detectIntent from your backend. Session ids are any string you choose; state is kept per session.'), curl, copy(curl)));
   draw();

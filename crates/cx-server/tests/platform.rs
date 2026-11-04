@@ -328,3 +328,38 @@ fn analytics_aggregates_conversations() {
     assert_eq!(a.arr("dropOffPages")[0].str("name"), "Default Start Flow › Start Page");
     assert_eq!(c.call("GET", "/v3/projects/a/locations/global/agents/missing/analytics", None).0, 404);
 }
+
+#[test]
+fn api_key_and_public_sessions() {
+    std::env::set_var("CXA_LOG", "0");
+    let start = |public_sessions: bool| {
+        let store = Arc::new(Store::in_memory());
+        cx_server::seed(&store, &[("pizza".into(), Value::parse(include_str!("../../../examples/pizza-agent.json")).unwrap())]);
+        let api = Arc::new(Api::new(store, cx_engine::Runtime::default()));
+        let server = Server::bind("127.0.0.1:0").unwrap();
+        let addr = server.spawn(cx_server::handler_with_auth(api, cx_server::Auth { api_key: Some("s3cret".into()), public_sessions }));
+        Client { base: format!("http://{}", addr) }
+    };
+    let get = |c: &Client, path: &str, hdr: Option<&str>| {
+        let h: Vec<(String, String)> = hdr.map(|v| vec![("Authorization".to_string(), v.to_string())]).unwrap_or_default();
+        request("GET", &format!("{}{}", c.base, path), &h, b"", Duration::from_secs(5)).unwrap().status
+    };
+    let c = start(false);
+    assert_eq!(get(&c, "/v3/projects", None), 401);
+    assert_eq!(get(&c, "/v3/projects", Some("Bearer wrong")), 401);
+    assert_eq!(get(&c, "/v3/projects", Some("Bearer s3cret")), 200);
+    assert_eq!(get(&c, "/v3/projects?key=s3cret", None), 200);
+    assert_eq!(get(&c, "/healthz", None), 200);
+    assert_eq!(get(&c, "/projects", None), 200, "console shell is public; data needs the key");
+    let info = c.ok("GET", "/v3/serverInfo", None);
+    assert_eq!(info.at("apiKeyRequired"), &Value::Bool(true));
+    let session = "/v3/projects/demo/locations/global/agents/pizza/sessions/w:detectIntent";
+    assert_eq!(c.call("POST", session, Some(&obj! {"queryInput" => obj!{"text" => obj!{"text" => "hi"}}})).0, 401);
+    // public sessions: chat works without a key, management does not
+    let c = start(true);
+    let (s, r) = c.call("POST", session, Some(&obj! {"queryInput" => obj!{"text" => obj!{"text" => "hi"}}}));
+    assert_eq!(s, 200);
+    assert!(texts(&r)[0].starts_with("Welcome to Rusty Pizza"));
+    assert_eq!(get(&c, "/v3/projects/demo/locations/global/agents/pizza", None), 401);
+    assert_eq!(c.call("POST", "/v3/projects/demo/locations/global/agents/pizza:export", Some(&obj! {})).0, 401);
+}

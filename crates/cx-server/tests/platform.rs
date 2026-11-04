@@ -190,3 +190,28 @@ fn session_entity_types_and_pagination() {
     let page2 = c.ok("GET", &format!("/v3/{}/intents?pageSize=3&pageToken={}", an, tok), None);
     assert!(!page2.arr("intents").is_empty());
 }
+
+#[test]
+fn zip_agent_import_and_json_package_export() {
+    let c = Client::start();
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "Z", "projectId" => "z"}));
+    // a Google-style JSON-package export zip (built with Python's zipfile, deflated)
+    let zip = include_bytes!("../../cx-core/src/testdata_agent.zip");
+    let b64 = cx_core::base64::encode(zip);
+    let a = c.ok("POST", "/v3/projects/z/locations/global/agents:import", Some(&obj! {"agentContent" => b64, "agentId" => "zipped"}));
+    assert_eq!(a.str("displayName"), "Zipped");
+    let r = c.say("projects/z/locations/global/agents/zipped/sessions/s", "hello there");
+    assert_eq!(texts(&r), vec!["Hi from a zip!"]);
+    // export as JSON package (base64 zip) and restore it into a second agent
+    let exp = c.ok("POST", "/v3/projects/z/locations/global/agents/zipped:export", Some(&obj! {"dataFormat" => "JSON_PACKAGE"}));
+    let content = exp.at("response").str("agentContent").to_string();
+    assert!(cx_core::zip::is_zip(&cx_core::base64::decode(&content).unwrap()));
+    c.ok("POST", "/v3/projects/z/locations/global/agents", Some(&obj! {"displayName" => "Target"}));
+    let target = c.ok("GET", "/v3/projects/z/locations/global/agents", None).arr("agents").iter().find(|x| x.str("displayName") == "Target").unwrap().str("name").to_string();
+    c.ok("POST", &format!("/v3/{}:restore", target), Some(&obj! {"agentContent" => content}));
+    let r = c.say(&format!("{}/sessions/t", target), "hello there");
+    assert_eq!(texts(&r), vec!["Hi from a zip!"]);
+    // garbage is rejected cleanly
+    let (s, e) = c.call("POST", "/v3/projects/z/locations/global/agents:import", Some(&obj! {"agentContent" => "UEsDBAo="}));
+    assert_eq!(s, 400, "{}", e);
+}

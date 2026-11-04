@@ -64,6 +64,31 @@ function download(name, text) {
 function pickFile() {
   return new Promise(res => { const i = h('input', { type: 'file', accept: '.json,application/json' }); i.onchange = () => { const f = i.files[0]; if (!f) return res(null); const rd = new FileReader(); rd.onload = () => res(rd.result); rd.readAsText(f); }; i.click(); });
 }
+// Picks an agent file (.json bundle or Google .zip/.blob export) and returns
+// the API's agentContent value: an object for JSON, base64 for archives.
+function pickAgentContent() {
+  return new Promise(res => {
+    const i = h('input', { type: 'file', accept: '.json,.zip,.blob,application/json,application/zip' });
+    i.onchange = () => {
+      const f = i.files[0]; if (!f) return res(null);
+      const rd = new FileReader();
+      rd.onload = () => {
+        const bytes = new Uint8Array(rd.result);
+        if (bytes[0] === 0x50 && bytes[1] === 0x4b) {
+          let bin = ''; for (let k = 0; k < bytes.length; k += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(k, k + 0x8000));
+          return res(btoa(bin));
+        }
+        try { res(JSON.parse(new TextDecoder().decode(bytes))); } catch (e) { toast('Not a JSON file or agent ZIP export', true); res(null); }
+      };
+      rd.readAsArrayBuffer(f);
+    };
+    i.click();
+  });
+}
+function downloadBase64(name, b64, type) {
+  const bin = atob(b64); const u = new Uint8Array(bin.length); for (let k = 0; k < bin.length; k++) u[k] = bin.charCodeAt(k);
+  const a = h('a', { href: URL.createObjectURL(new Blob([u], { type })), download: name }); a.click();
+}
 function tabs(names, render) {
   const bar = h('div', { class: 'tabs' }); const body = h('div');
   const show = n => { [...bar.children].forEach(b => b.classList.toggle('on', b.dataset.n === n)); body.innerHTML = ''; body.append(render(n)); tabs.last = n; };
@@ -142,7 +167,7 @@ async function agentsPage(main, project, loc) {
   const locSel = h('select', { class: 'inline', onchange: e => go(`/projects/${project}/locations/${e.target.value}/agents`) }, LOCATIONS.map(l => h('option', { value: l, selected: l === loc }, l)));
   main.append(h('div', { class: 'row between' }, h('h1', null, 'Agents'),
     h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Location'), locSel,
-      h('button', { class: 'btn', onclick: () => importAgent(parent) }, 'Import agent'),
+      h('button', { class: 'btn', title: 'Import a .json bundle or a Google Conversational Agents export (.zip / .blob)', onclick: () => importAgent(parent) }, 'Import agent'),
       h('button', { class: 'btn primary', onclick: () => newAgent(parent) }, '+ Create agent'),
       h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Delete project ${proj.displayName} and all its agents?`)) { await guard(() => api.del(`projects/${project}`), 'Project deleted'); go('/projects'); } } }, 'Delete project'))));
   if (!agents.length) main.append(h('div', { class: 'empty' }, `No agents in ${loc}. Create one or import an exported agent.`));
@@ -165,9 +190,8 @@ async function newAgent(parent) {
   if (r) go('/' + r.name + '/flows');
 }
 async function importAgent(parent) {
-  const text = await pickFile(); if (!text) return;
-  let bundle; try { bundle = JSON.parse(text); } catch (e) { return toast('Not a JSON file', true); }
-  const a = await guard(() => api.post(parent + '/agents:import', { agentContent: bundle }), 'Agent imported');
+  const content = await pickAgentContent(); if (!content) return;
+  const a = await guard(() => api.post(parent + '/agents:import', { agentContent: content }), 'Agent imported');
   go('/' + a.name + '/flows');
 }
 
@@ -733,7 +757,8 @@ async function settingsSection(ctx, rest, main) {
     h('label', { class: 'inline', style: 'margin-top:10px' }, h('input', { type: 'checkbox', checked: ((x.advancedSettings || {}).loggingSettings || {}).enableInteractionLogging !== false, onchange: e => { x.advancedSettings = x.advancedSettings || {}; x.advancedSettings.loggingSettings = Object.assign({}, x.advancedSettings.loggingSettings, { enableInteractionLogging: e.target.checked }); } }), 'Log conversation history')));
   main.append(h('h2', null, 'Import / export'), h('div', { class: 'row' },
     h('button', { class: 'btn', onclick: async () => { const r = await api.get(ctx.agent + ':export'); download(slug(a.displayName) + '.agent.json', JSON.stringify(r.response.agentContent, null, 2)); } }, 'Export agent (JSON)'),
-    h('button', { class: 'btn', onclick: async () => { const t = await pickFile(); if (!t) return; if (!confirm('Restore replaces all flows, intents and other resources of this agent. Continue?')) return; await guard(() => api.post(ctx.agent + ':restore', { agentContent: JSON.parse(t) }), 'Agent restored'); render(); } }, 'Restore from file')));
+    h('button', { class: 'btn', onclick: async () => { const r = await api.post(ctx.agent + ':export', { dataFormat: 'JSON_PACKAGE' }); downloadBase64(slug(a.displayName) + '.zip', r.response.agentContent, 'application/zip'); } }, 'Export JSON package (.zip)'),
+    h('button', { class: 'btn', onclick: async () => { const c = await pickAgentContent(); if (!c) return; if (!confirm('Restore replaces all flows, intents and other resources of this agent. Continue?')) return; await guard(() => api.post(ctx.agent + ':restore', { agentContent: c }), 'Agent restored'); render(); } }, 'Restore from file (.json / .zip)')));
   main.append(h('h2', null, 'Danger zone'), h('button', { class: 'btn danger', onclick: async () => { if (!confirm(`Delete agent "${a.displayName}"? This cannot be undone.`)) return; await guard(() => api.del(ctx.agent), 'Agent deleted'); go(`/${parentOf(ctx.agent)}/agents`); } }, 'Delete agent'));
 }
 function slug(s) { return (s || 'agent').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }

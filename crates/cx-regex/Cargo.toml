@@ -1,0 +1,8 @@
+[package]
+name = "cx-regex"
+description = "Small backtracking regular-expression engine with linear-time memoisation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

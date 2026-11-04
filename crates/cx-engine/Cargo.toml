@@ -1,0 +1,12 @@
+[package]
+name = "cx-engine"
+description = "Conversational Agents runtime: flows, pages, forms, fulfillment, webhooks, playbooks, testing"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cx-core = { path = "../cx-core" }
+cx-regex = { path = "../cx-regex" }
+cx-nlu = { path = "../cx-nlu" }
+cx-http = { path = "../cx-http" }

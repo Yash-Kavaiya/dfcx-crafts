@@ -1,0 +1,10 @@
+[package]
+name = "cx-nlu"
+description = "Natural-language understanding: intent classification and entity extraction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cx-core = { path = "../cx-core" }
+cx-regex = { path = "../cx-regex" }

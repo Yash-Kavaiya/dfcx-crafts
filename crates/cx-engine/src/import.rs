@@ -719,3 +719,117 @@ mod tests {
         assert_eq!(b2.arr("flows")[0].arr("pages")[0].str("name"), page.str("name"));
     }
 }
+
+// ---- ZIP (agent export blobs) ------------------------------------------------
+
+const MAX_ZIP_BYTES: usize = 256 * 1024 * 1024;
+
+fn temp_dir(tag: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!("cxa-{}-{}", tag, cx_core::uuid::new_v4()))
+}
+
+/// Imports a Conversational Agents agent export ZIP (`.zip` / `.blob`,
+/// JSON-package format). The archive may wrap the package in a top-level
+/// folder.
+pub fn import_cx_zip(bytes: &[u8]) -> Result<Value, String> {
+    let entries = cx_core::zip::read(bytes, MAX_ZIP_BYTES).map_err(|e| e.to_string())?;
+    let root = temp_dir("import");
+    let result = (|| {
+        for e in &entries {
+            // reject absolute paths and parent traversal
+            let rel = e.name.trim_start_matches('/');
+            if rel.split('/').any(|seg| seg == ".." || seg.contains(':')) {
+                return Err(format!("unsafe path in archive: {}", e.name));
+            }
+            let path = root.join(rel);
+            if let Some(d) = path.parent() {
+                std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+            }
+            std::fs::write(&path, &e.data).map_err(|e| e.to_string())?;
+        }
+        let agent_json = entries
+            .iter()
+            .map(|e| e.name.trim_start_matches('/'))
+            .filter(|n| n.rsplit('/').next() == Some("agent.json"))
+            .min_by_key(|n| n.matches('/').count())
+            .ok_or("archive has no agent.json (is this a JSON-package agent export?)")?
+            .to_string();
+        let pkg_root = match agent_json.rsplit_once('/') {
+            Some((dir, _)) => root.join(dir),
+            None => root.clone(),
+        };
+        import_cx_directory(&pkg_root)
+    })();
+    let _ = std::fs::remove_dir_all(&root);
+    result
+}
+
+/// Exports a bundle as a JSON-package ZIP archive.
+pub fn export_cx_zip(bundle: &Value) -> Result<Vec<u8>, String> {
+    let root = temp_dir("export");
+    let result = (|| {
+        export_cx_directory(bundle, &root)?;
+        let mut entries = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            let mut items: Vec<_> = std::fs::read_dir(&dir).map_err(|e| e.to_string())?.filter_map(|e| e.ok()).map(|e| e.path()).collect();
+            items.sort();
+            for p in items {
+                if p.is_dir() {
+                    stack.push(p);
+                } else {
+                    let rel = p.strip_prefix(&root).map_err(|e| e.to_string())?.to_string_lossy().replace('\\', "/");
+                    entries.push(cx_core::zip::Entry { name: rel, data: std::fs::read(&p).map_err(|e| e.to_string())? });
+                }
+            }
+        }
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(cx_core::zip::write(&entries))
+    })();
+    let _ = std::fs::remove_dir_all(&root);
+    result
+}
+
+/// Parses agent content given as raw bytes: a ZIP export, or JSON (a bundle
+/// or an `:export` response).
+pub fn parse_agent_bytes(bytes: &[u8]) -> Result<Value, String> {
+    if cx_core::zip::is_zip(bytes) {
+        return import_cx_zip(bytes);
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| "agent content is neither a ZIP archive nor UTF-8 JSON".to_string())?;
+    let v = Value::parse(text).map_err(|e| e.to_string())?;
+    if let Some(c) = v.path("response.agentContent").or_else(|| v.get("agentContent")) {
+        return Ok(c.clone());
+    }
+    Ok(v)
+}
+
+#[cfg(test)]
+mod zip_tests {
+    use super::*;
+
+    #[test]
+    fn imports_python_zip_and_roundtrips() {
+        let bytes = include_bytes!("../../cx-core/src/testdata_agent.zip");
+        let b = parse_agent_bytes(bytes).unwrap();
+        assert_eq!(b.at("agent").str("displayName"), "Zipped");
+        assert_eq!(b.arr("intents")[0].arr("trainingPhrases").len(), 40);
+        let n = normalize_bundle(&b, "projects/p/locations/global/agents/z");
+        let a = crate::Agent::compile(&n).unwrap();
+        let rt = crate::Runtime::default();
+        let mut st = crate::SessionState::new();
+        let r = rt.detect_intent(&a, "s", &mut st, &cx_core::obj! {"queryInput" => cx_core::obj!{"text" => cx_core::obj!{"text" => "hello there"}}});
+        assert_eq!(crate::response_texts(&r), vec!["Hi from a zip!"]);
+        // export -> zip -> import keeps content
+        let z = export_cx_zip(&n).unwrap();
+        let back = normalize_bundle(&parse_agent_bytes(&z).unwrap(), "projects/p/locations/global/agents/z");
+        assert_eq!(back.arr("intents").len(), n.arr("intents").len());
+        assert_eq!(back.arr("flows")[0].arr("transitionRoutes").len(), 1);
+    }
+
+    #[test]
+    fn rejects_path_traversal() {
+        let z = cx_core::zip::write(&[cx_core::zip::Entry { name: "../evil/agent.json".into(), data: b"{}".to_vec() }]);
+        assert!(import_cx_zip(&z).unwrap_err().contains("unsafe path"));
+    }
+}

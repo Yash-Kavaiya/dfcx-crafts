@@ -14,12 +14,12 @@ USAGE:
   cxa serve [--addr HOST:PORT] [--data FILE | --memory] [--api-key KEY] [--seed AGENT.json ...]
       Run the multi-tenant platform: REST API under /v3 and the web console at /projects.
   cxa chat AGENT [--say TEXT ...] [--debug]
-      Talk to an agent bundle (.json) or an exported JSON-package directory in the terminal.
+      Talk to an agent: a bundle (.json), a Google export (.zip/.blob) or an unzipped JSON-package directory.
   cxa test AGENT
       Run the agent's test cases; exits non-zero on failure.
   cxa validate AGENT
       Validate an agent and print the findings.
-  cxa convert AGENT --to bundle FILE | --to package DIR
+  cxa convert AGENT --to bundle FILE | --to package DIR | --to zip FILE.zip
       Convert between the single-file bundle and the JSON-package directory format.
   cxa version
 
@@ -49,13 +49,9 @@ fn load_raw(path: &str) -> Result<Value, String> {
     if p.is_dir() {
         return import_cx_directory(p);
     }
-    let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {}", path, e))?;
-    let v = Value::parse(&text).map_err(|e| format!("{}: {}", path, e))?;
-    // accept an :export response or LRO wrapper too
-    if let Some(c) = v.path("response.agentContent").or_else(|| v.get("agentContent")) {
-        return Ok(c.clone());
-    }
-    Ok(v)
+    // a .json bundle / :export response, or a Google agent export (.zip/.blob)
+    let bytes = std::fs::read(p).map_err(|e| format!("{}: {}", path, e))?;
+    cx_engine::import::parse_agent_bytes(&bytes).map_err(|e| format!("{}: {}", path, e))
 }
 
 fn load_agent(path: &str) -> Result<Agent, String> {
@@ -289,6 +285,7 @@ fn convert(args: &[String]) -> Result<bool, String> {
     match to.as_str() {
         "bundle" => std::fs::write(out, b.to_pretty()).map_err(|e| e.to_string())?,
         "package" => export_cx_directory(&b, Path::new(out))?,
+        "zip" => std::fs::write(out, cx_engine::import::export_cx_zip(&b)?).map_err(|e| e.to_string())?,
         other => return Err(format!("unknown target format '{}'", other)),
     }
     println!("wrote {}", out);

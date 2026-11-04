@@ -511,11 +511,17 @@ impl Api {
             ("agents", "export") => {
                 let d = self.store.data.lock().unwrap();
                 let b = bundle(&d, name).ok_or_else(|| ApiError::not_found(name))?;
+                drop(d);
+                if body.str("dataFormat") == "JSON_PACKAGE" || body.str("dataFormat") == "BLOB" {
+                    // agentContent is base64 bytes, as in the Google API
+                    let zip = cx_engine::import::export_cx_zip(&b).map_err(|e| ApiError::new(500, e))?;
+                    return Ok(operation(obj! {"agentContent" => cx_core::base64::encode(&zip)}, "ExportAgentResponse"));
+                }
                 Ok(operation(obj! {"agentContent" => b}, "ExportAgentResponse"))
             }
             ("agents", "restore") => {
                 let content = body.get("agentContent").or_else(|| body.get("bundle")).ok_or_else(|| ApiError::bad("agentContent is required"))?;
-                let content = if let Some(s) = content.as_str() { Value::parse(s).map_err(|e| ApiError::bad(e.to_string()))? } else { content.clone() };
+                let content = agent_content(content)?;
                 let mut d = self.store.data.lock().unwrap();
                 if d.get(name).is_none() {
                     return Err(ApiError::not_found(name));
@@ -530,7 +536,7 @@ impl Api {
                 // create a new agent from a bundle: POST {location}:importAgent or {location}/agents:import
                 let location = if coll == "agents" { parent_of(&format!("{}/x", name)).to_string() } else { name.to_string() };
                 let location = if collection_of(&location) == "agents" { parent_of(&location).to_string() } else { location };
-                let content = body.get("agentContent").or_else(|| body.get("bundle")).cloned().unwrap_or_else(|| body.clone());
+                let content = agent_content(body.get("agentContent").or_else(|| body.get("bundle")).unwrap_or(body))?;
                 let id = body.get("agentId").and_then(Value::as_str).map(String::from).unwrap_or_else(cx_core::uuid::new_v4);
                 let agent_name = format!("{}/agents/{}", location, id);
                 let mut d = self.store.data.lock().unwrap();
@@ -775,6 +781,23 @@ impl Api {
             .collect();
         let matches = if matches.is_empty() { arr![obj! {"matchType" => "NO_MATCH", "resolvedInput" => text.clone()}] } else { Value::Array(matches) };
         Ok(obj! {"text" => text, "matches" => matches})
+    }
+}
+
+/// Decodes `agentContent`: an inline bundle object, a JSON string, or
+/// base64 bytes of a ZIP export / JSON document.
+fn agent_content(v: &Value) -> Result<Value, ApiError> {
+    match v {
+        Value::Object(_) => Ok(v.clone()),
+        Value::String(s) => {
+            let t = s.trim_start();
+            if t.starts_with('{') {
+                return Value::parse(t).map_err(|e| ApiError::bad(format!("agentContent: {}", e)));
+            }
+            let bytes = cx_core::base64::decode(s).map_err(|e| ApiError::bad(format!("agentContent: {}", e)))?;
+            cx_engine::import::parse_agent_bytes(&bytes).map_err(|e| ApiError::bad(format!("agentContent: {}", e)))
+        }
+        _ => Err(ApiError::bad("agentContent must be an object or base64 string")),
     }
 }
 

@@ -34,7 +34,7 @@ enum Tok {
 }
 
 fn is_ref_char(c: char) -> bool {
-    c.is_alphanumeric() || c == '_' || c == '-' || c == '.'
+    c.is_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '[' || c == ']'
 }
 
 fn lex(src: &str) -> Result<Vec<Tok>, String> {

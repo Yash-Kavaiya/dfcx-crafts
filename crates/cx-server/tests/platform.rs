@@ -229,3 +229,44 @@ fn messenger_widget_is_served_and_demo_validates_input() {
     let (s, _) = c.call("GET", "/messenger/demo?agent=x%22%3E%3Cscript%3E", None);
     assert_eq!(s, 400);
 }
+
+#[test]
+fn data_stores_and_knowledge_connectors_over_http() {
+    let c = Client::start();
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "K", "projectId" => "k"}));
+    let loc = "projects/k/locations/global";
+    let ds = c.ok("POST", &format!("/v3/{}/dataStores", loc), Some(&obj! {"displayName" => "faq", "type" => "FAQ"}));
+    let dsn = ds.str("name").to_string();
+    let imp = c.ok("POST", &format!("/v3/{}/documents:import", dsn), Some(&obj! {"faqCsv" => "question,answer\nIs parking free?,\"Yes, parking is free for customers.\"\nDo you have wifi?,Free wifi is available in every store.\n"}));
+    assert_eq!(imp.at("response").f64_field("importedCount"), Some(2.0));
+    let s = c.ok("POST", &format!("/v3/{}:search", dsn), Some(&obj! {"query" => "is there wifi"}));
+    assert_eq!(s.arr("results")[0].str("snippet"), "Free wifi is available in every store.");
+
+    // a new agent whose start flow uses the data store
+    let a = c.ok("POST", &format!("/v3/{}/agents", loc), Some(&obj! {"displayName" => "Store bot"}));
+    let an = a.str("name").to_string();
+    let flow = c.ok("GET", &format!("/v3/{}/flows", an), None).arr("flows")[0].str("name").to_string();
+    c.ok(
+        "PATCH",
+        &format!("/v3/{}?updateMask=knowledgeConnectorSettings", flow),
+        Some(&obj! {"knowledgeConnectorSettings" => obj!{"enabled" => true, "dataStoreConnections" => cx_core::arr![obj!{"dataStoreType" => "FAQ", "dataStore" => dsn.clone()}]}}),
+    );
+    let r = c.say(&format!("{}/sessions/s", an), "can I park for free?");
+    assert_eq!(texts(&r), vec!["Yes, parking is free for customers."]);
+    // export carries the referenced data store; importing elsewhere recreates it
+    let exp = c.ok("POST", &format!("/v3/{}:export", an), Some(&obj! {}));
+    let content = exp.at("response").at("agentContent").clone();
+    assert_eq!(content.arr("dataStores").len(), 1);
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "K2", "projectId" => "k2"}));
+    c.ok("POST", "/v3/projects/k2/locations/global/agents:import", Some(&obj! {"agentContent" => content, "agentId" => "copy"}));
+    let r = c.say("projects/k2/locations/global/agents/copy/sessions/s", "do you have wifi?");
+    assert_eq!(texts(&r), vec!["Free wifi is available in every store."]);
+    assert_eq!(c.ok("GET", "/v3/projects/k2/locations/global/dataStores", None).arr("dataStores").len(), 1);
+    // the help-center example imports with both stores and passes its tests
+    let help = Value::parse(include_str!("../../../examples/help-center-agent.json")).unwrap();
+    c.ok("POST", &format!("/v3/{}/agents:import", loc), Some(&obj! {"agentContent" => help, "agentId" => "help"}));
+    let run = c.ok("POST", &format!("/v3/{}/agents/help/testCases:batchRun", loc), Some(&obj! {}));
+    for res in run.at("response").arr("results") {
+        assert_eq!(res.str("testResult"), "PASSED", "{}", res.to_pretty());
+    }
+}

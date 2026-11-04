@@ -73,6 +73,7 @@ pub struct Turn<'a> {
     pub(crate) request_payload: Value,
     pub(crate) generative: Map,
     pub(crate) alternatives: Vec<Value>,
+    pub(crate) knowledge: Value,
     pub(crate) halted: bool,
 }
 
@@ -114,6 +115,10 @@ impl<'a> Scope for Turn<'a> {
         if let Some(rest) = path.strip_prefix("request.generative.") {
             return self.generative.get(rest).cloned().unwrap_or_default();
         }
+        if let Some(rest) = path.strip_prefix("request.knowledge.") {
+            let p = rest.replace('[', ".").replace(']', "");
+            return self.knowledge.path(&p).cloned().unwrap_or_default();
+        }
         if let Some(rest) = path.strip_prefix("request.payload.") {
             return self.request_payload.path(rest).cloned().unwrap_or_default();
         }
@@ -153,6 +158,7 @@ impl Runtime {
             request_payload: Value::Null,
             generative: Map::new(),
             alternatives: Vec::new(),
+            knowledge: Value::Null,
             halted: false,
         };
         t.run(req);
@@ -436,6 +442,9 @@ impl<'a> Turn<'a> {
             return;
         }
         if self.evaluate_condition_routes() {
+            return;
+        }
+        if self.try_knowledge(text) {
             return;
         }
         self.no_match();
@@ -1115,6 +1124,9 @@ impl<'a> Turn<'a> {
         }
         if !self.webhook_payloads.is_empty() {
             qr.set("webhookPayloads", Value::Array(self.webhook_payloads.clone()));
+        }
+        if !self.knowledge.is_null() {
+            qr.set("knowledgeAnswers", obj! {"answers" => self.knowledge.at("details").clone()});
         }
         if self.st.playbook.is_none() {
             qr.set("currentPage", self.page_ref());

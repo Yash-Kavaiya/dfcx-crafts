@@ -68,7 +68,7 @@ fn singular(collection: &str) -> &str {
 
 /// Collections whose display names must be unique within the parent.
 fn unique_display(collection: &str) -> bool {
-    !matches!(collection, "projects" | "results" | "changelogs" | "conversations" | "examples" | "sessions" | "versions" | "continuousTestResults")
+    !matches!(collection, "projects" | "documents" | "results" | "changelogs" | "conversations" | "examples" | "sessions" | "versions" | "continuousTestResults")
 }
 
 /// Collections that may not be written through generic CRUD.
@@ -687,6 +687,66 @@ impl Api {
                 d.put(name, env);
                 self.commit(&d);
                 Ok(operation(obj! {"environment" => name}, "DeployFlowResponse"))
+            }
+            ("dataStores", "search") => {
+                let d = self.store.data.lock().unwrap();
+                let ds = d.get(name).cloned().ok_or_else(|| ApiError::not_found(name))?;
+                let mut docs: Vec<Value> = d.list(name, "documents").into_iter().map(public).collect();
+                drop(d);
+                let mut single = public(&ds);
+                single.set("documents", Value::Array(std::mem::take(&mut docs)));
+                let ix = cx_engine::knowledge::build_indexes(&obj! {"dataStores" => cx_core::arr![single]});
+                let query = body.str("query");
+                if query.trim().is_empty() {
+                    return Err(ApiError::bad("query is required"));
+                }
+                let k = body.f64_field("pageSize").unwrap_or(5.0).clamp(1.0, 50.0) as usize;
+                let hits = ix.get(name).map(|i| i.search(query, k)).unwrap_or_default();
+                let results: Vec<Value> = hits
+                    .iter()
+                    .map(|h| {
+                        obj! {
+                            "document" => h.passage.document.clone(),
+                            "title" => h.passage.title.clone(),
+                            "uri" => h.passage.uri.clone(),
+                            "snippet" => h.passage.text.clone(),
+                            "faqQuestion" => h.passage.question.clone(),
+                            "score" => (h.score * 1000.0).round() / 1000.0,
+                            "confidence" => (h.confidence * 1000.0).round() / 1000.0,
+                        }
+                    })
+                    .collect();
+                Ok(obj! {"results" => Value::Array(results)})
+            }
+            ("documents", "import") => {
+                // POST .../dataStores/{d}/documents:import
+                //   {"documents": [{title, content, uri} | {structData:{question, answer}}]}
+                //   or {"faqCsv": "question,answer\n..."}
+                let ds_name = parent_of(&format!("{}/x", name)).to_string();
+                let mut d = self.store.data.lock().unwrap();
+                if d.get(&ds_name).is_none() {
+                    return Err(ApiError::not_found(&ds_name));
+                }
+                let mut docs: Vec<Value> = body.arr("documents").to_vec();
+                for (q, a) in cx_nlu::search::parse_faq_csv(body.str("faqCsv")) {
+                    docs.push(obj! {"displayName" => q.clone(), "structData" => obj!{"question" => q, "answer" => a}});
+                }
+                if docs.is_empty() {
+                    return Err(ApiError::bad("provide documents or faqCsv"));
+                }
+                let mut created = 0;
+                for mut doc in docs {
+                    if doc.str("displayName").is_empty() {
+                        let t = if doc.str("title").is_empty() { "document".to_string() } else { doc.str("title").to_string() };
+                        doc.set("displayName", t);
+                    }
+                    let n = format!("{}/documents/{}", ds_name, cx_core::uuid::new_v4());
+                    doc.set("name", n.clone());
+                    d.put(&n, doc);
+                    created += 1;
+                }
+                self.commit(&d);
+                Ok(operation(obj! {"importedCount" => created}, "ImportDocumentsResponse"))
             }
             ("environments", "runContinuousTest") => {
                 let agent = ancestor(name, "agents").unwrap_or_default();

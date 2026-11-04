@@ -11,6 +11,7 @@
 pub mod agent;
 pub mod expr;
 pub mod import;
+pub mod knowledge;
 pub mod llm;
 pub mod playbook;
 pub mod runtime;

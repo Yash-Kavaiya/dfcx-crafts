@@ -309,6 +309,11 @@ impl<'a> Turn<'a> {
     // ---- tools ------------------------------------------------------------
 
     pub(crate) fn execute_tool(&mut self, tool: &Value, action: &str, input: &Value) -> Result<Value, String> {
+        if tool.get("dataStoreSpec").is_some() {
+            let r = self.data_store_tool(tool, input);
+            self.log("Tool", obj! {"tool" => tool.str("displayName"), "kind" => "dataStore", "ok" => r.is_ok()});
+            return r;
+        }
         let Some(spec) = tool.get("openApiSpec") else {
             return Err(format!("tool '{}' type is not executable server-side", tool.str("displayName")));
         };

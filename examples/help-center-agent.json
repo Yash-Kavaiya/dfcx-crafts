@@ -1,0 +1,95 @@
+{
+  "agent": {
+    "displayName": "Help Center",
+    "description": "Sample agent: knowledge connectors over an FAQ data store and a document data store, with an intent route for human handoff.",
+    "defaultLanguageCode": "en",
+    "timeZone": "UTC"
+  },
+  "dataStores": [
+    {
+      "displayName": "store-faq",
+      "type": "FAQ",
+      "documents": [
+        { "displayName": "hours", "structData": { "question": "What are your opening hours?", "answer": "Our support team is available Monday to Friday, 8am to 8pm UTC." } },
+        { "displayName": "ship-intl", "structData": { "question": "Do you ship internationally?", "answer": "Yes, we ship to more than 40 countries. Duties are calculated at checkout." } },
+        { "displayName": "password", "structData": { "question": "How do I reset my password?", "answer": "Use 'Forgot password' on the sign-in page and follow the link we email you." } }
+      ]
+    },
+    {
+      "displayName": "policies",
+      "type": "UNSTRUCTURED",
+      "documents": [
+        {
+          "displayName": "returns",
+          "title": "Returns and refunds",
+          "uri": "https://example.com/policies/returns",
+          "content": "You can return any unused item within 30 days of delivery. Start a return from the Orders page and print the prepaid label.\n\nRefunds are issued to the original payment method within 5 business days after we receive the item."
+        },
+        {
+          "displayName": "warranty",
+          "title": "Warranty",
+          "uri": "https://example.com/policies/warranty",
+          "content": "Electronics carry a two year limited warranty covering manufacturing defects. Accidental damage and water damage are not covered."
+        }
+      ]
+    }
+  ],
+  "intents": [
+    {
+      "displayName": "agent.handoff",
+      "trainingPhrases": [
+        { "parts": [{ "text": "talk to a human" }] },
+        { "parts": [{ "text": "I want to speak with an agent" }] },
+        { "parts": [{ "text": "connect me to support staff" }] }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "displayName": "Default Start Flow",
+      "transitionRoutes": [
+        {
+          "intent": "agent.handoff",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Connecting you to a support specialist."] } }] },
+          "targetPage": "END_FLOW_WITH_HUMAN_ESCALATION"
+        }
+      ],
+      "knowledgeConnectorSettings": {
+        "enabled": true,
+        "dataStoreConnections": [
+          { "dataStoreType": "FAQ", "dataStore": "store-faq" },
+          { "dataStoreType": "UNSTRUCTURED", "dataStore": "policies" }
+        ],
+        "triggerFulfillment": {
+          "messages": [{ "text": { "text": ["$request.knowledge.answers[0]"] } }]
+        }
+      },
+      "eventHandlers": [
+        {
+          "event": "sys.no-match-default",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["I couldn't find that in our help center. You can ask to talk to a human."] } }] }
+        }
+      ]
+    }
+  ],
+  "testCases": [
+    {
+      "displayName": "FAQ answer",
+      "testCaseConversationTurns": [
+        {
+          "userInput": { "input": { "text": { "text": "do you ship to other countries internationally?" } } },
+          "virtualAgentOutput": { "textResponses": [{ "text": ["Yes, we ship to more than 40 countries. Duties are calculated at checkout."] }] }
+        }
+      ]
+    },
+    {
+      "displayName": "Unknown question falls back to no-match",
+      "testCaseConversationTurns": [
+        {
+          "userInput": { "input": { "text": { "text": "what is the airspeed of an unladen swallow" } } },
+          "virtualAgentOutput": { "textResponses": [{ "text": ["I couldn't find that in our help center. You can ask to talk to a human."] }] }
+        }
+      ]
+    }
+  ]
+}

@@ -21,6 +21,8 @@ pub struct Agent {
     pub bundle: Value,
     pub classifier: Classifier,
     pub threshold: f64,
+    /// Search indexes of the data stores carried by the bundle.
+    pub indexes: std::collections::HashMap<String, cx_nlu::search::Index>,
 }
 
 /// Finds a resource in a list by full name, id or display name.
@@ -73,7 +75,8 @@ impl Agent {
         }
         let classifier = Classifier::new(intents, registry);
         let threshold = raw.path("nluSettings.classificationThreshold").and_then(Value::as_f64).unwrap_or(0.3);
-        Ok(Agent { name, raw, bundle: bundle.clone(), classifier, threshold })
+        let indexes = crate::knowledge::build_indexes(bundle);
+        Ok(Agent { name, raw, bundle: bundle.clone(), classifier, threshold, indexes })
     }
 
     /// Normalises an entity-type reference to the key used by the NLU

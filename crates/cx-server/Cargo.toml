@@ -1,0 +1,12 @@
+[package]
+name = "cx-server"
+description = "Conversational Agents REST API (v3-compatible) and web console"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+cx-core = { path = "../cx-core" }
+cx-nlu = { path = "../cx-nlu" }
+cx-http = { path = "../cx-http" }
+cx-engine = { path = "../cx-engine" }

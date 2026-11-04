@@ -771,6 +771,11 @@ impl<'a> Turn<'a> {
             self.log("Parameter preset", obj! {"parameter" => key.clone(), "value" => v.clone()});
             self.st.set_param(&key, v);
         }
+        // Generators run first so their output ($request.generative.*) can be
+        // used by this fulfillment's messages.
+        for g in f.arr("generators") {
+            self.run_generator(g);
+        }
         for m in f.arr("messages") {
             if let Some(rendered) = self.render_message(m) {
                 self.messages.push(rendered);
@@ -779,9 +784,6 @@ impl<'a> Turn<'a> {
         for cc in f.arr("conditionalCases") {
             let cases = cc.arr("cases").to_vec();
             self.run_cases(&cases);
-        }
-        for g in f.arr("generators") {
-            self.run_generator(g);
         }
         let wh = f.str("webhook");
         if !wh.is_empty() {

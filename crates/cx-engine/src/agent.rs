@@ -181,6 +181,9 @@ impl Agent {
         if let Some(f) = self.flow(cx_core::name::DEFAULT_START_FLOW_ID).or_else(|| self.flow("Default Start Flow")) {
             return Some(f.str("name").to_string());
         }
+        if self.start_playbook().is_some() {
+            return None;
+        }
         self.flows().first().map(|f| f.str("name").to_string())
     }
 

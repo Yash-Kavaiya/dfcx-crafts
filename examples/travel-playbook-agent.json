@@ -1,0 +1,87 @@
+{
+  "agent": {
+    "displayName": "Travel Concierge",
+    "description": "Sample generative agent: a playbook with instructions, examples, an OpenAPI tool and a hand-off flow.",
+    "defaultLanguageCode": "en",
+    "timeZone": "Europe/Paris",
+    "startPlaybook": "Concierge"
+  },
+  "tools": [
+    {
+      "displayName": "flights",
+      "description": "Look up flight availability and fares.",
+      "openApiSpec": {
+        "textSchema": "openapi: 3.0.0\ninfo:\n  title: Flights API\n  version: \"1.0\"\nservers:\n  - url: http://127.0.0.1:9099/api\npaths:\n  /flights:\n    get:\n      operationId: searchFlights\n      parameters:\n        - name: destination\n          in: query\n          required: true\n          schema: { type: string }\n        - name: date\n          in: query\n          schema: { type: string }\n"
+      }
+    }
+  ],
+  "playbooks": [
+    {
+      "displayName": "Concierge",
+      "goal": "Help travellers search flights, answer baggage questions and hand off to a human when asked.",
+      "instruction": {
+        "steps": [
+          { "text": "Greet the traveller and ask where they want to go." },
+          { "text": "To find flights, use ${TOOL:flights} with the destination and date.", "steps": [{ "text": "Summarise the cheapest option." }] },
+          { "text": "If the traveller asks for a person, hand off to the Human Handoff flow." }
+        ]
+      },
+      "referencedTools": ["flights"],
+      "referencedFlows": ["Human Handoff"],
+      "outputParameterDefinitions": [{ "name": "destination", "type": "STRING" }],
+      "examples": [
+        {
+          "displayName": "Find a flight",
+          "actions": [
+            { "userUtterance": { "text": "I want to fly to Lisbon" } },
+            { "agentUtterance": { "text": "Lovely choice! What date would you like to travel to Lisbon?" } },
+            { "userUtterance": { "text": "next friday" } },
+            { "toolUse": { "tool": "flights", "action": "searchFlights", "inputActionParameters": { "destination": "Lisbon" }, "outputActionParameters": { "cheapest": 89 } } },
+            { "agentUtterance": { "text": "The cheapest flight to Lisbon next Friday is 89 EUR. Shall I hold it for you?" } },
+            { "userUtterance": { "text": "yes hold it" } },
+            { "agentUtterance": { "text": "Done — your seat is on hold for 24 hours. Have a great trip!" } }
+          ],
+          "playbookOutput": { "actionParameters": { "destination": "Lisbon" } },
+          "conversationState": "OUTPUT_STATE_OK"
+        },
+        {
+          "displayName": "Baggage allowance",
+          "actions": [
+            { "userUtterance": { "text": "how much baggage can I bring" } },
+            { "agentUtterance": { "text": "You can bring one cabin bag up to 10kg and one checked bag up to 23kg." } }
+          ]
+        },
+        {
+          "displayName": "Ask for a human",
+          "actions": [
+            { "userUtterance": { "text": "I want to talk to a real person" } },
+            { "flowInvocation": { "flow": "Human Handoff" } }
+          ]
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "displayName": "Human Handoff",
+      "transitionRoutes": [
+        {
+          "condition": "true",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Connecting you to a travel specialist now."] } }] },
+          "targetPage": "END_FLOW_WITH_HUMAN_ESCALATION"
+        }
+      ]
+    }
+  ],
+  "testCases": [
+    {
+      "displayName": "Baggage question (example replay)",
+      "testCaseConversationTurns": [
+        {
+          "userInput": { "input": { "text": { "text": "how much luggage can I bring?" } } },
+          "virtualAgentOutput": { "textResponses": [{ "text": ["You can bring one cabin bag up to 10kg and one checked bag up to 23kg."] }] }
+        }
+      ]
+    }
+  ]
+}

@@ -31,3 +31,23 @@ dependencies = [
 [[package]]
 name = "cx-regex"
 version = "0.1.0"
+
+[[package]]
+name = "cx-server"
+version = "0.1.0"
+dependencies = [
+ "cx-core",
+ "cx-engine",
+ "cx-http",
+ "cx-nlu",
+]
+
+[[package]]
+name = "cxa"
+version = "0.1.0"
+dependencies = [
+ "cx-core",
+ "cx-engine",
+ "cx-http",
+ "cx-server",
+]

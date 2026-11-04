@@ -12,7 +12,7 @@ with `cargo build`.
 
 ```
 cargo build --release
-./target/release/cxa serve --seed examples/pizza-agent.json --seed examples/travel-playbook-agent.json
+./target/release/cxa serve --seed examples/pizza-agent.json --seed examples/travel-playbook-agent.json --seed examples/help-center-agent.json
 # console: http://127.0.0.1:8080/projects     API: http://127.0.0.1:8080/v3/projects
 ```
 
@@ -57,6 +57,9 @@ and every agent can be exported, imported into another project, or restored.
 | **Generative** | Playbooks with goal, nested instructions, examples, referenced tools, playbooks and flows; OpenAPI tools (YAML or JSON schema, path/query/body parameters, API-key auth); client-side function tools (`toolCall` / `toolCallResult`); generators. Uses any OpenAI-compatible endpoint; **without an LLM, playbooks replay their examples deterministically** |
 | **Lifecycle** | Flow versions (snapshot, load, compare), environments that pin versions, continuous tests, test cases (`run`, `batchRun`, `calculateCoverage`), validation, change history, conversation history, export/restore |
 | **Agent files** | Import Google Conversational Agents exports directly: `.zip` / `.blob` archives (JSON package) or unzipped folders, through the console, `agents:import` / `:restore` (base64 `agentContent`) and the CLI; export as a single JSON bundle or a JSON-package `.zip` (`dataFormat: JSON_PACKAGE`). Built on an in-tree DEFLATE decoder and ZIP reader/writer |
+| **Data stores & knowledge** | Location-level data stores (document or FAQ) with documents, FAQ CSV import and a `:search` method; BM25 retrieval with passage chunking. Page/flow `knowledgeConnectorSettings` answer unmatched questions from connected stores (extractive, or grounded through the LLM) with `$request.knowledge.answers[0]` and `queryResult.knowledgeAnswers`; `dataStoreSpec` tools let playbooks search them. Exports carry referenced stores |
+| **Analytics** | `GET {agent}/analytics?days=&environment=`: conversations, turns, no-match rate, completion, live-agent handoffs, webhook error rate, match types, top intents with confidence, most visited and drop-off pages, turns per day, recent unmatched inputs (one click adds them to an intent) |
+| **Security** | Parameters marked `redact` (page, intent or entity type) are masked in stored history while callers get real values; `securitySettings` with `purgeDataTypes: [DIALOGFLOW_HISTORY]` or `retentionWindowDays` |
 | **Integrations** | `<cx-messenger>` embeddable chat widget (`/messenger.js`) with Dialogflow-Messenger-style rich content (chips, buttons, info cards, images), environment selection and API-key support; a hosted demo page (`/messenger/demo?agent=…`); an Integrations page in the console with copy-ready snippets |
 | **API** | Generic CRUD for every collection with `pageSize`/`pageToken`, `updateMask`, `filter`; Google-style errors; optional API key; CORS |
 
@@ -148,7 +151,11 @@ Custom methods:
 | environments | `:deployFlow`, `:runContinuousTest` |
 | intents, entity types | `:batchDelete` |
 
-Helper endpoints: `GET /v3/systemEntities`, `GET /v3/systemFunctions` and `GET /healthz`.
+Helper endpoints: `GET /v3/systemEntities`, `GET /v3/systemFunctions`, `GET /v3/{agent}/analytics` and `GET /healthz`.
+
+| Data stores | Methods |
+|---|---|
+| `projects/*/locations/*/dataStores/{d}` | `:search` (`{query, pageSize}`); `…/documents:import` (`{documents}` or `{faqCsv}`) |
 
 ## Workspace layout
 
@@ -156,7 +163,7 @@ Helper endpoints: `GET /v3/systemEntities`, `GET /v3/systemFunctions` and `GET /
 |---|---|
 | `cx-core` | JSON value, parser and serializer (order-preserving); RFC 3339 time; UUID v4; resource names; base64; DEFLATE + ZIP |
 | `cx-regex` | Backtracking regex VM with bit-state memoisation (linear time), classes, groups, lazy quantifiers, `(?i)` |
-| `cx-nlu` | Tokenizer, stemmer, system and custom entity extraction, intent classifier |
+| `cx-nlu` | Tokenizer, stemmer, system and custom entity extraction, intent classifier, BM25 document search |
 | `cx-http` | HTTP/1.1 server (keep-alive, chunked) and client |
 | `cx-engine` | Agent compiler, runtime, expression language, playbooks and tools, YAML reader, importer and exporter, test runner, validator |
 | `cx-server` | Persistent store, v3 REST API, embedded console (`assets/`) |
@@ -177,7 +184,7 @@ clients should feel familiar.
 **Known gaps:**
 
 - No speech (STT/TTS) or telephony.
-- No data-store (RAG) tools.
+- Data stores use local BM25 search, not Vertex AI Search.
 - Plain HTTP only for outbound calls, because there is no TLS library. Put a
   local TLS-terminating proxy in front of HTTPS webhooks.
 - The NLU is a fast heuristic classifier, not Google's ML model.

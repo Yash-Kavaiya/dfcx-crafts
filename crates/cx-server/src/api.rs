@@ -120,6 +120,9 @@ impl Api {
         if name == "systemEntities" {
             return Ok(obj! {"systemEntities" => Value::Array(cx_nlu::system::SYSTEM_ENTITIES.iter().map(|(n, d)| obj!{"name" => format!("@{}", n), "description" => *d}).collect())});
         }
+        if let Some(agent) = name.strip_suffix("/analytics").filter(|_| method == "GET") {
+            return self.analytics(agent, req);
+        }
         if name == "systemFunctions" {
             return Ok(obj! {"functions" => Value::from(cx_engine::expr::FUNCTIONS.to_vec())});
         }
@@ -443,6 +446,134 @@ impl Api {
         Self::changelog(&mut d, name, "Delete", &dn);
         self.commit(&d);
         Ok(Value::object())
+    }
+
+    /// Aggregated conversation metrics for an agent (`GET {agent}/analytics`,
+    /// optional `days` and `environment` query parameters). Reads the
+    /// (already redacted) conversation history.
+    fn analytics(&self, agent: &str, req: &Request) -> ApiResult {
+        let d = self.store.data.lock().unwrap();
+        if d.get(agent).is_none() {
+            return Err(ApiError::not_found(agent));
+        }
+        let days: i64 = req.query_param("days").and_then(|x| x.parse().ok()).filter(|x| *x > 0).unwrap_or(30);
+        let env_filter = req.query_param("environment").unwrap_or("").to_string();
+        let cutoff = cx_core::time::rfc3339_millis(cx_core::time::now_millis() - days * 86_400_000);
+        let prefix = format!("{}/", agent);
+        let mut sessions = 0u64;
+        let mut turns = 0u64;
+        let mut ended = 0u64;
+        let mut handoffs = 0u64;
+        let mut webhook_calls = 0u64;
+        let mut webhook_errors = 0u64;
+        let mut text_turns = 0u64;
+        let mut match_types: std::collections::BTreeMap<String, u64> = Default::default();
+        let mut intents: std::collections::HashMap<String, (u64, f64)> = Default::default();
+        let mut pages: std::collections::HashMap<String, u64> = Default::default();
+        let mut dropoff: std::collections::HashMap<String, u64> = Default::default();
+        let mut per_day: std::collections::BTreeMap<String, u64> = Default::default();
+        let mut unmatched: Vec<(String, String)> = Vec::new();
+        for (session, entries) in d.transcripts.iter().filter(|(k, _)| k.starts_with(&prefix)) {
+            let in_env = match ancestor(session, "environments") {
+                Some(e) => env_filter == e || env_filter == id_of(&e),
+                None => env_filter.is_empty() || env_filter == "draft",
+            };
+            if !in_env {
+                continue;
+            }
+            let recent: Vec<&Value> = entries.iter().filter(|e| e.str("createTime") >= cutoff.as_str()).collect();
+            if recent.is_empty() {
+                continue;
+            }
+            sessions += 1;
+            let mut session_ended = false;
+            let mut last_page = String::new();
+            for e in &recent {
+                turns += 1;
+                let qr = e.at("response").at("queryResult");
+                let mt = qr.at("match").str("matchType").to_string();
+                *match_types.entry(mt.clone()).or_insert(0) += 1;
+                if qr.get("text").is_some() {
+                    text_turns += 1;
+                }
+                if mt == "NO_MATCH" {
+                    unmatched.push((e.str("createTime").to_string(), qr.str("text").to_string()));
+                }
+                if let Some(i) = qr.get("intent") {
+                    let slot = intents.entry(i.str("displayName").to_string()).or_insert((0, 0.0));
+                    slot.0 += 1;
+                    slot.1 += qr.f64_field("intentDetectionConfidence").unwrap_or(0.0);
+                }
+                let page = if let Some(pb) = qr.get("currentPlaybook") {
+                    format!("Playbook: {}", pb.str("displayName"))
+                } else {
+                    format!("{} › {}", qr.at("currentFlow").str("displayName"), qr.at("currentPage").str("displayName"))
+                };
+                *pages.entry(page.clone()).or_insert(0) += 1;
+                last_page = page;
+                for ws in qr.arr("webhookStatuses") {
+                    webhook_calls += 1;
+                    if ws.f64_field("code").unwrap_or(0.0) != 0.0 {
+                        webhook_errors += 1;
+                    }
+                }
+                for m in qr.arr("responseMessages") {
+                    if m.get("liveAgentHandoff").is_some() {
+                        handoffs += 1;
+                    }
+                    if m.get("endInteraction").is_some() {
+                        session_ended = true;
+                    }
+                }
+                let day = e.str("createTime").get(..10).unwrap_or("").to_string();
+                *per_day.entry(day).or_insert(0) += 1;
+            }
+            if session_ended {
+                ended += 1;
+            } else if !last_page.is_empty() {
+                *dropoff.entry(last_page).or_insert(0) += 1;
+            }
+        }
+        let top = |m: std::collections::HashMap<String, u64>, n: usize| -> Value {
+            let mut v: Vec<(String, u64)> = m.into_iter().collect();
+            v.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            Value::Array(v.into_iter().take(n).map(|(k, c)| obj! {"name" => k, "count" => c}).collect())
+        };
+        let mut intent_rows: Vec<(String, u64, f64)> = intents.into_iter().map(|(k, (c, s))| (k, c, s / c as f64)).collect();
+        intent_rows.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+        // fill every day of the window so the time series has no gaps
+        let today = cx_core::time::Date::today();
+        let series: Vec<Value> = (0..days.min(90))
+            .rev()
+            .map(|i| {
+                let day = today.add_days(-i).iso();
+                obj! {"date" => day.clone(), "turns" => *per_day.get(&day).unwrap_or(&0)}
+            })
+            .collect();
+        unmatched.sort_by(|a, b| b.0.cmp(&a.0));
+        let no_match = *match_types.get("NO_MATCH").unwrap_or(&0);
+        let rate = |n: u64, total: u64| if total == 0 { 0.0 } else { ((n as f64 / total as f64) * 1000.0).round() / 1000.0 };
+        Ok(obj! {
+            "agent" => agent,
+            "days" => days,
+            "environment" => if env_filter.is_empty() { "draft".to_string() } else { env_filter.clone() },
+            "summary" => obj!{
+                "sessions" => sessions,
+                "turns" => turns,
+                "avgTurnsPerSession" => if sessions == 0 { 0.0 } else { ((turns as f64 / sessions as f64) * 10.0).round() / 10.0 },
+                "noMatchRate" => rate(no_match, text_turns),
+                "endedSessions" => ended,
+                "liveAgentHandoffs" => handoffs,
+                "webhookCalls" => webhook_calls,
+                "webhookErrorRate" => rate(webhook_errors, webhook_calls),
+            },
+            "matchTypes" => Value::Array(match_types.into_iter().map(|(k, c)| obj!{"name" => k, "count" => c}).collect()),
+            "topIntents" => Value::Array(intent_rows.into_iter().take(10).map(|(k, c, a)| obj!{"name" => k, "count" => c, "avgConfidence" => (a * 1000.0).round() / 1000.0}).collect()),
+            "topPages" => top(pages, 10),
+            "dropOffPages" => top(dropoff, 10),
+            "turnsPerDay" => Value::Array(series),
+            "recentUnmatched" => Value::Array(unmatched.into_iter().take(25).map(|(t, q)| obj!{"time" => t, "text" => q}).collect()),
+        })
     }
 
     fn conversations(&self, d: &Data, agent: &str) -> Value {

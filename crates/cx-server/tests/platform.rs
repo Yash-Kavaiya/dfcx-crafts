@@ -303,3 +303,28 @@ fn redaction_and_security_settings() {
     c.say("projects/r/locations/global/agents/bank/sessions/y", "hello");
     assert_eq!(c.call("GET", "/v3/projects/r/locations/global/agents/bank/conversations/y", None).0, 404);
 }
+
+#[test]
+fn analytics_aggregates_conversations() {
+    let c = Client::start();
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "A", "projectId" => "a"}));
+    let pizza = Value::parse(include_str!("../../../examples/pizza-agent.json")).unwrap();
+    c.ok("POST", "/v3/projects/a/locations/global/agents:import", Some(&obj! {"agentContent" => pizza, "agentId" => "p"}));
+    let base = "projects/a/locations/global/agents/p";
+    c.say(&format!("{}/sessions/1", base), "hi");
+    c.say(&format!("{}/sessions/1", base), "what's the weather like on mars");
+    c.say(&format!("{}/sessions/2", base), "order pizza");
+    c.say(&format!("{}/sessions/2", base), "cancel");
+    let a = c.ok("GET", &format!("/v3/{}/analytics?days=7", base), None);
+    let s = a.at("summary");
+    assert_eq!(s.f64_field("sessions"), Some(2.0));
+    assert_eq!(s.f64_field("turns"), Some(4.0));
+    assert_eq!(s.f64_field("noMatchRate"), Some(0.25));
+    assert_eq!(s.f64_field("endedSessions"), Some(1.0));
+    assert_eq!(a.arr("recentUnmatched")[0].str("text"), "what's the weather like on mars");
+    assert!(a.arr("topIntents").iter().any(|i| i.str("name") == "order.pizza"));
+    assert_eq!(a.arr("turnsPerDay").len(), 7);
+    assert_eq!(a.arr("turnsPerDay")[6].f64_field("turns"), Some(4.0));
+    assert_eq!(a.arr("dropOffPages")[0].str("name"), "Default Start Flow › Start Page");
+    assert_eq!(c.call("GET", "/v3/projects/a/locations/global/agents/missing/analytics", None).0, 404);
+}

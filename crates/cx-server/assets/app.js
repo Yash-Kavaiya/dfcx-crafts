@@ -199,7 +199,7 @@ async function importAgent(parent) {
 const SECTIONS = [
   ['Build', [['flows', 'Flows'], ['playbooks', 'Playbooks'], ['tools', 'Tools'], ['dataStores', 'Data stores'], ['intents', 'Intents'], ['entityTypes', 'Entity types'], ['transitionRouteGroups', 'Route groups'], ['webhooks', 'Webhooks'], ['generators', 'Generators']]],
   ['Test & deploy', [['testCases', 'Test cases'], ['environments', 'Environments'], ['validation', 'Validation']]],
-  ['Monitor', [['conversations', 'Conversation history'], ['changelogs', 'Change history']]],
+  ['Monitor', [['analytics', 'Analytics'], ['conversations', 'Conversation history'], ['changelogs', 'Change history']]],
   ['Manage', [['integrations', 'Integrations'], ['settings', 'Agent settings']]],
 ];
 async function agentShell(agent, rest, main) {
@@ -217,7 +217,7 @@ async function agentShell(agent, rest, main) {
     flows: flowsSection, intents: intentsSection, entityTypes: entitiesSection, webhooks: webhooksSection,
     transitionRouteGroups: groupsSection, generators: generatorsSection, playbooks: playbooksSection, tools: toolsSection,
     testCases: testsSection, environments: envSection, validation: validationSection, conversations: convSection,
-    changelogs: changelogSection, settings: settingsSection, integrations: integrationsSection, dataStores: dataStoresSection,
+    changelogs: changelogSection, settings: settingsSection, integrations: integrationsSection, dataStores: dataStoresSection, analytics: analyticsSection,
   }[section];
   if (!fn) return main.append(h('div', { class: 'empty' }, 'Unknown section'));
   await fn(ctx, rest.slice(1), main);
@@ -791,6 +791,67 @@ async function validationSection(ctx, rest, main) {
   main.append(h('h2', null, 'Agent'), table(r.agentValidationMessages || []));
   for (const f of r.flowValidationResults || []) main.append(h('h2', null, 'Flow: ' + f.flowDisplayName), table(f.validationMessages || []));
 }
+// ---------- analytics ----------
+const tip = (() => { let t; return { show(e, html) { if (!t) { t = h('div', { class: 'tip', role: 'tooltip' }); document.body.append(t); } t.innerHTML = html; t.style.display = 'block'; t.style.left = Math.min(e.clientX + 12, innerWidth - t.offsetWidth - 8) + 'px'; t.style.top = (e.clientY + 14) + 'px'; }, hide() { if (t) t.style.display = 'none'; } }; })();
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function statTile(label, value, sub) { return h('div', { class: 'stat' }, h('div', { class: 'stat-l' }, label), h('div', { class: 'stat-v' }, value), sub ? h('div', { class: 'stat-s' }, sub) : null); }
+const pct = x => (Math.round(x * 1000) / 10) + '%';
+function hbars(rows, fmt) {
+  if (!rows.length) return h('div', { class: 'muted' }, 'No data yet.');
+  const max = Math.max(...rows.map(r => r.count), 1);
+  return h('div', { class: 'hbars' }, rows.map(r => h('div', { class: 'hbar', onmousemove: e => tip.show(e, `<b>${escHtml(r.name)}</b><br>${r.count} turns${r.avgConfidence != null ? ' · avg confidence ' + r.avgConfidence : ''}`), onmouseleave: () => tip.hide() },
+    h('div', { class: 'hbar-l', title: r.name }, r.name || '—'), h('div', { class: 'hbar-t' }, h('div', { class: 'hbar-f', style: `width:${Math.max(2, (r.count / max) * 100)}%` })), h('div', { class: 'hbar-v' }, fmt ? fmt(r) : r.count))));
+}
+function columnChart(series) {
+  const max = Math.max(...series.map(d => d.turns), 0);
+  const cols = h('div', { class: 'cols', role: 'img', 'aria-label': 'Turns per day' }, series.map(d => h('div', { class: 'colw', onmousemove: e => tip.show(e, `<b>${d.date}</b><br>${d.turns} turn${d.turns === 1 ? '' : 's'}`), onmouseleave: () => tip.hide() },
+    d.turns ? h('div', { class: 'colb', style: `height:${(d.turns / max) * 100}%` }) : null)));
+  const n = series.length; const mid = Math.floor(n / 2);
+  const axis = h('div', { class: 'colx' }, h('span', null, series[0] ? series[0].date.slice(5) : ''), h('span', null, series[mid] ? series[mid].date.slice(5) : ''), h('span', null, series[n - 1] ? series[n - 1].date.slice(5) : ''));
+  const table = h('details', null, h('summary', { class: 'muted' }, 'Show as table'), h('table', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Turns')), series.slice().reverse().map(d => h('tr', null, h('td', null, d.date), h('td', null, d.turns)))));
+  return h('div', null, h('div', { class: 'colchart' }, h('div', { class: 'coly' }, max ? 'max ' + max : 'no turns yet'), cols, axis), table);
+}
+async function analyticsSection(ctx, rest, main) {
+  S.an = S.an || { days: 30, env: '' };
+  const envs = await ctx.list('environments');
+  const q = { days: S.an.days }; if (S.an.env) q.environment = S.an.env;
+  const a = await api.get(ctx.agent + '/analytics', q);
+  const s = a.summary;
+  main.append(header('Analytics', `Last ${a.days} days · ${S.an.env ? 'environment ' + idOf(S.an.env) : 'draft'} · based on conversation history`));
+  main.append(h('div', { class: 'row filters', style: 'margin-bottom:12px' },
+    h('span', { class: 'muted' }, 'Range'), sel([['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']], String(S.an.days), v => { S.an.days = +v; render(); }),
+    h('span', { class: 'muted' }, 'Environment'), sel([['', 'Draft'], ...envs.map(e => [e.name, e.displayName])], S.an.env, v => { S.an.env = v; render(); })));
+  main.append(h('div', { class: 'stats' },
+    statTile('Conversations', s.sessions), statTile('Turns', s.turns, s.avgTurnsPerSession + ' per conversation'),
+    statTile('No-match rate', pct(s.noMatchRate), 'of text inputs'), statTile('Completed', s.endedSessions, 'reached end of session'),
+    statTile('Live agent handoffs', s.liveAgentHandoffs), statTile('Webhook errors', pct(s.webhookErrorRate), s.webhookCalls + (s.webhookCalls === 1 ? ' call' : ' calls'))));
+  main.append(h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Turns per day'), columnChart(a.turnsPerDay)));
+  main.append(h('div', { class: 'grid2' },
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Match types'), hbars(a.matchTypes.sort((x, y) => y.count - x.count))),
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Top intents'), hbars(a.topIntents, r => `${r.count} · ${Math.round(r.avgConfidence * 100)}% conf.`)),
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Most visited pages'), hbars(a.topPages)),
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Drop-off pages'), h('div', { class: 'muted', style: 'margin:-4px 0 8px' }, 'Where conversations that did not end were last seen'), hbars(a.dropOffPages))));
+  const intents = await ctx.list('intents');
+  const addTo = u => {
+    const pick = sel([['', 'Add to intent…'], ...intents.map(i => [i.name, i.displayName])], '', async v => {
+      if (!v) return;
+      const it = await api.get(v);
+      const phrases = [{ parts: [{ text: u.text }], repeatCount: 1 }, ...(it.trainingPhrases || [])];
+      await guard(() => api.patch(v, { trainingPhrases: phrases }, 'trainingPhrases'), `Added to ${it.displayName}`);
+      pick.value = '';
+    });
+    return pick;
+  };
+  const rows = a.recentUnmatched.map(u => h('tr', null,
+    h('td', { style: 'width:170px' }, u.time.replace('T', ' ').slice(0, 19)),
+    h('td', null, u.text),
+    h('td', { style: 'width:260px' }, addTo(u))));
+  main.append(h('div', { class: 'card' },
+    h('h2', { style: 'margin-top:0' }, 'Recent unmatched user inputs'),
+    h('div', { class: 'muted', style: 'margin:-4px 0 8px' }, 'Add them as training phrases to improve coverage.'),
+    rows.length ? h('table', null, h('tr', null, h('th', null, 'Time'), h('th', null, 'User said'), h('th', null, '')), rows) : h('div', { class: 'muted' }, 'Nothing unmatched in this period.')));
+}
+
 async function convSection(ctx, rest, main) {
   if (rest[0]) {
     const c = await api.get(`${ctx.agent}/conversations/${rest[0]}`);

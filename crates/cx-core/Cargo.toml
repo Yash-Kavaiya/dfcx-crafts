@@ -1,0 +1,8 @@
+[package]
+name = "cx-core"
+description = "Core primitives (JSON, time, ids) for the Conversational Agents runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]

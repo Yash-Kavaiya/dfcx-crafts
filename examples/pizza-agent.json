@@ -1,0 +1,339 @@
+{
+  "agent": {
+    "displayName": "Rusty Pizza",
+    "defaultLanguageCode": "en",
+    "timeZone": "America/New_York",
+    "description": "Sample agent: ordering pizza with forms, a sub-flow, route groups, conditional responses and a webhook.",
+    "startFlow": "Default Start Flow",
+    "nluSettings": { "modelType": "MODEL_TYPE_STANDARD", "classificationThreshold": 0.3 }
+  },
+  "entityTypes": [
+    {
+      "displayName": "size",
+      "kind": "KIND_MAP",
+      "enableFuzzyExtraction": true,
+      "entities": [
+        { "value": "small", "synonyms": ["small", "personal", "little"] },
+        { "value": "medium", "synonyms": ["medium", "regular", "normal"] },
+        { "value": "large", "synonyms": ["large", "big", "family size", "extra large"] }
+      ]
+    },
+    {
+      "displayName": "topping",
+      "kind": "KIND_MAP",
+      "enableFuzzyExtraction": true,
+      "entities": [
+        { "value": "pepperoni", "synonyms": ["pepperoni", "salami"] },
+        { "value": "mushroom", "synonyms": ["mushroom", "mushrooms", "shrooms"] },
+        { "value": "olives", "synonyms": ["olives", "black olives"] },
+        { "value": "ham", "synonyms": ["ham"] },
+        { "value": "pineapple", "synonyms": ["pineapple"] },
+        { "value": "cheese", "synonyms": ["cheese", "extra cheese", "mozzarella"] }
+      ]
+    },
+    {
+      "displayName": "order-id",
+      "kind": "KIND_REGEXP",
+      "entities": [{ "value": "ORD-\\d{4}", "synonyms": ["ORD-\\d{4}"] }]
+    }
+  ],
+  "intents": [
+    {
+      "displayName": "Default Welcome Intent",
+      "trainingPhrases": [
+        { "parts": [{ "text": "hi" }] }, { "parts": [{ "text": "hello" }] }, { "parts": [{ "text": "hey there" }] },
+        { "parts": [{ "text": "good morning" }] }, { "parts": [{ "text": "howdy" }] }
+      ]
+    },
+    { "displayName": "Default Negative Intent", "trainingPhrases": [{ "parts": [{ "text": "what's the weather like" }] }] },
+    {
+      "displayName": "order.pizza",
+      "parameters": [
+        { "id": "size", "entityType": "@size" },
+        { "id": "topping", "entityType": "@topping", "isList": true },
+        { "id": "count", "entityType": "@sys.number" }
+      ],
+      "trainingPhrases": [
+        { "parts": [{ "text": "I want to order a pizza" }] },
+        { "parts": [{ "text": "can I get a pizza" }] },
+        { "parts": [{ "text": "order pizza" }] },
+        { "parts": [{ "text": "I'd like a " }, { "text": "large", "parameterId": "size" }, { "text": " pizza" }] },
+        { "parts": [{ "text": "a " }, { "text": "small", "parameterId": "size" }, { "text": " " }, { "text": "pepperoni", "parameterId": "topping" }, { "text": " pizza please" }] },
+        { "parts": [{ "text": "order " }, { "text": "2", "parameterId": "count" }, { "text": " pizzas" }] },
+        { "parts": [{ "text": "I'm hungry, get me a pizza with " }, { "text": "ham", "parameterId": "topping" }] }
+      ]
+    },
+    {
+      "displayName": "order.status",
+      "parameters": [{ "id": "order_id", "entityType": "@order-id" }],
+      "trainingPhrases": [
+        { "parts": [{ "text": "where is my order" }] },
+        { "parts": [{ "text": "track my order" }] },
+        { "parts": [{ "text": "status of order " }, { "text": "ORD-1234", "parameterId": "order_id" }] },
+        { "parts": [{ "text": "check order status" }] }
+      ]
+    },
+    {
+      "displayName": "store.hours",
+      "trainingPhrases": [
+        { "parts": [{ "text": "when are you open" }] },
+        { "parts": [{ "text": "what are your opening hours" }] },
+        { "parts": [{ "text": "what time do you close" }] }
+      ]
+    },
+    {
+      "displayName": "confirm.yes",
+      "trainingPhrases": [
+        { "parts": [{ "text": "yes" }] }, { "parts": [{ "text": "yes please" }] }, { "parts": [{ "text": "sure" }] },
+        { "parts": [{ "text": "correct" }] }, { "parts": [{ "text": "that's right" }] }, { "parts": [{ "text": "go ahead" }] }
+      ]
+    },
+    {
+      "displayName": "confirm.no",
+      "trainingPhrases": [
+        { "parts": [{ "text": "no" }] }, { "parts": [{ "text": "nope" }] }, { "parts": [{ "text": "that's wrong" }] },
+        { "parts": [{ "text": "not really" }] }
+      ]
+    },
+    {
+      "displayName": "cancel",
+      "trainingPhrases": [
+        { "parts": [{ "text": "cancel" }] }, { "parts": [{ "text": "never mind" }] }, { "parts": [{ "text": "stop" }] },
+        { "parts": [{ "text": "forget it" }] }
+      ]
+    }
+  ],
+  "webhooks": [
+    {
+      "displayName": "orders",
+      "timeout": "5s",
+      "genericWebService": { "uri": "http://127.0.0.1:8090/webhook" }
+    }
+  ],
+  "transitionRouteGroups": [
+    {
+      "displayName": "Common",
+      "transitionRoutes": [
+        {
+          "intent": "cancel",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Okay, I've cancelled that. Come back hungry!"] } }] },
+          "targetPage": "END_SESSION"
+        }
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "displayName": "Default Start Flow",
+      "transitionRouteGroups": ["Common"],
+      "transitionRoutes": [
+        {
+          "intent": "Default Welcome Intent",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Welcome to Rusty Pizza! You can order a pizza, track an order or ask for our hours."] } }] }
+        },
+        { "intent": "order.pizza", "targetFlow": "Order Pizza" },
+        { "intent": "order.status", "targetPage": "Order Status" },
+        {
+          "intent": "store.hours",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["We're open every day from 11am to 11pm."] } }] }
+        }
+      ],
+      "eventHandlers": [
+        {
+          "event": "sys.no-match-default",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Sorry, I didn't catch that. You can order a pizza, track an order or ask for our hours."] } }] }
+        },
+        {
+          "event": "sys.no-input-default",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Are you still there?"] } }] }
+        }
+      ],
+      "pages": [
+        {
+          "displayName": "Order Status",
+          "transitionRouteGroups": ["Common"],
+          "form": {
+            "parameters": [
+              {
+                "displayName": "order_id",
+                "entityType": "@order-id",
+                "required": true,
+                "fillBehavior": {
+                  "initialPromptFulfillment": { "messages": [{ "text": { "text": ["What's your order number? It looks like ORD-1234."] } }] },
+                  "repromptEventHandlers": [
+                    {
+                      "event": "sys.no-match-default",
+                      "triggerFulfillment": { "messages": [{ "text": { "text": ["That doesn't look like an order number. It should look like ORD-1234."] } }] }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          "transitionRoutes": [
+            {
+              "condition": "$page.params.status = \"FINAL\"",
+              "triggerFulfillment": { "messages": [{ "text": { "text": ["Order $session.params.order_id is out for delivery and should arrive in 20 minutes."] } }] },
+              "targetPage": "END_SESSION"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "displayName": "Order Pizza",
+      "transitionRoutes": [{ "condition": "true", "targetPage": "Collect Order" }],
+      "eventHandlers": [
+        {
+          "event": "sys.no-match-default",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Sorry, I didn't get that."] } }] }
+        },
+        {
+          "event": "webhook.error",
+          "triggerFulfillment": { "messages": [{ "text": { "text": ["Our ordering system is down right now. Please try again later."] } }] },
+          "targetPage": "END_SESSION"
+        }
+      ],
+      "pages": [
+        {
+          "displayName": "Collect Order",
+          "transitionRouteGroups": ["Common"],
+          "form": {
+            "parameters": [
+              {
+                "displayName": "size",
+                "entityType": "@size",
+                "required": true,
+                "fillBehavior": {
+                  "initialPromptFulfillment": { "messages": [{ "text": { "text": ["What size would you like: small, medium or large?"] } }] },
+                  "repromptEventHandlers": [
+                    {
+                      "event": "sys.no-match-1",
+                      "triggerFulfillment": { "messages": [{ "text": { "text": ["Sorry, which size? Small, medium or large?"] } }] }
+                    },
+                    {
+                      "event": "sys.no-match-2",
+                      "triggerFulfillment": { "messages": [{ "text": { "text": ["Let's go with medium then."] } }], "setParameterActions": [{ "parameter": "size", "value": "medium" }] },
+                      "targetPage": "CURRENT_PAGE"
+                    }
+                  ]
+                }
+              },
+              {
+                "displayName": "topping",
+                "entityType": "@topping",
+                "required": true,
+                "isList": true,
+                "fillBehavior": {
+                  "initialPromptFulfillment": { "messages": [{ "text": { "text": ["Which toppings would you like?"] } }] }
+                }
+              },
+              {
+                "displayName": "count",
+                "entityType": "@sys.number",
+                "required": false,
+                "defaultValue": 1
+              }
+            ]
+          },
+          "transitionRoutes": [
+            {
+              "condition": "$page.params.status = \"FINAL\"",
+              "triggerFulfillment": {
+                "setParameterActions": [
+                  { "parameter": "unit_price", "value": "$sys.func.IF(\"$session.params.size = \\\"large\\\"\", 15, 10)" },
+                  { "parameter": "total", "value": "$sys.func.MULTIPLY($session.params.count, $session.params.unit_price)" }
+                ],
+                "messages": [{ "text": { "text": ["Got it: $session.params.count $session.params.size pizza with $session.params.topping. That's $$session.params.total."] } }],
+                "conditionalCases": [
+                  {
+                    "cases": [
+                      {
+                        "condition": "$session.params.size = \"large\"",
+                        "caseContent": [{ "message": { "text": { "text": ["Large is our most popular choice!"] } } }]
+                      },
+                      { "caseContent": [{ "message": { "text": { "text": ["Good choice."] } } }] }
+                    ]
+                  }
+                ]
+              },
+              "targetPage": "Confirm"
+            }
+          ]
+        },
+        {
+          "displayName": "Confirm",
+          "transitionRouteGroups": ["Common"],
+          "entryFulfillment": { "messages": [{ "text": { "text": ["Shall I place the order?"] } }] },
+          "transitionRoutes": [
+            {
+              "intent": "confirm.yes",
+              "triggerFulfillment": { "webhook": "orders", "tag": "place-order" },
+              "targetPage": "END_FLOW"
+            },
+            {
+              "intent": "confirm.no",
+              "triggerFulfillment": {
+                "messages": [{ "text": { "text": ["No problem, let's start over."] } }],
+                "setParameterActions": [{ "parameter": "size", "value": null }, { "parameter": "topping", "value": null }]
+              },
+              "targetPage": "Collect Order"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "testCases": [
+    {
+      "displayName": "Happy path: large pepperoni",
+      "tags": ["#smoke"],
+      "testCaseConversationTurns": [
+        {
+          "userInput": { "input": { "text": { "text": "hi" } } },
+          "virtualAgentOutput": {
+            "triggeredIntent": { "displayName": "Default Welcome Intent" },
+            "currentPage": { "displayName": "Start Page" },
+            "textResponses": [{ "text": ["Welcome to Rusty Pizza! You can order a pizza, track an order or ask for our hours."] }]
+          }
+        },
+        {
+          "userInput": { "input": { "text": { "text": "I'd like a big pizza" } } },
+          "virtualAgentOutput": {
+            "triggeredIntent": { "displayName": "order.pizza" },
+            "currentPage": { "displayName": "Collect Order" },
+            "sessionParameters": { "size": "large" },
+            "textResponses": [{ "text": ["Which toppings would you like?"] }]
+          }
+        },
+        {
+          "userInput": { "input": { "text": { "text": "pepperoni and mushrooms" } } },
+          "virtualAgentOutput": {
+            "currentPage": { "displayName": "Confirm" },
+            "sessionParameters": { "topping": ["pepperoni", "mushroom"], "count": 1, "total": 15 }
+          }
+        }
+      ]
+    },
+    {
+      "displayName": "Order status with regexp entity",
+      "testCaseConversationTurns": [
+        {
+          "userInput": { "input": { "text": { "text": "track my order" } } },
+          "virtualAgentOutput": {
+            "triggeredIntent": { "displayName": "order.status" },
+            "currentPage": { "displayName": "Order Status" },
+            "textResponses": [{ "text": ["What's your order number? It looks like ORD-1234."] }]
+          }
+        },
+        {
+          "userInput": { "input": { "text": { "text": "it's ORD-4321" } } },
+          "virtualAgentOutput": {
+            "sessionParameters": { "order_id": "ORD-4321" },
+            "textResponses": [{ "text": ["Order ORD-4321 is out for delivery and should arrive in 20 minutes."] }]
+          }
+        }
+      ]
+    }
+  ]
+}

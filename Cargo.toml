@@ -1,0 +1,22 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/cx-core",
+    "crates/cx-regex",
+    "crates/cx-nlu",
+    "crates/cx-http",
+    "crates/cx-engine",
+    "crates/cx-server",
+    "crates/cxa",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/yash-kavaiya/dfcx-crafts"
+rust-version = "1.75"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

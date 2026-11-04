@@ -1,0 +1,17 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --workspace --locked || cargo build --workspace
+      - run: cargo test --workspace
+      - run: cargo run -q -p cxa -- test examples/pizza-agent.json
+      - run: cargo run -q -p cxa -- test examples/travel-playbook-agent.json
+      - run: node --check crates/cx-server/assets/app.js

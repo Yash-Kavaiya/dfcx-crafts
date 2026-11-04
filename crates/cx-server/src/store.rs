@@ -136,7 +136,15 @@ impl Data {
     /// Deletes a resource and everything beneath it.
     pub fn delete_tree(&mut self, name: &str) -> usize {
         let prefix = format!("{}/", name);
-        let keys: Vec<String> = self.resources.range(name.to_string()..).take_while(|(k, _)| *k == name || k.starts_with(&prefix)).map(|(k, _)| k.clone()).collect();
+        // Keys sharing the textual prefix (e.g. `a/bank-eu` vs `a/bank/...`)
+        // interleave in sort order, so scan the whole prefix range and filter.
+        let keys: Vec<String> = self
+            .resources
+            .range(name.to_string()..)
+            .take_while(|(k, _)| k.starts_with(name))
+            .filter(|(k, _)| *k == name || k.starts_with(&prefix))
+            .map(|(k, _)| k.clone())
+            .collect();
         for k in &keys {
             self.resources.remove(k);
             self.seq.remove(k);
@@ -295,7 +303,9 @@ mod tests {
         assert_eq!(agents.len(), 2);
         assert!(agents[0].str("name").ends_with("/b"), "creation order");
         assert_eq!(public(agents[1]).get("_x"), None);
+        d.put("projects/p/locations/global/agents/a-2", obj! {"name" => "x"});
         assert_eq!(d.delete_tree("projects/p/locations/global/agents/a"), 2);
+        assert!(d.get("projects/p/locations/global/agents/a-2").is_some());
         assert!(valid_resource_name("projects/p/locations/l/agents/a/flows/f/pages/x"));
         assert!(!valid_resource_name("projects/p/locations/l/agents/a/pages/x"));
     }

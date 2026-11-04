@@ -392,7 +392,9 @@ async function flowGraph(ctx, flow, pages) {
     const x1 = a.x + W, y1 = a.y + H / 2, x2 = b.x, y2 = b.y + H / 2;
     const d = self ? `M${a.x + W - 30},${a.y} C${a.x + W},${a.y - 40} ${a.x + W + 30},${a.y} ${a.x + W},${a.y + 10}` : (x2 > x1 ? `M${x1},${y1} C${x1 + 45},${y1} ${x2 - 45},${y2} ${x2},${y2}` : `M${a.x + W / 2},${a.y + H} C${a.x + W / 2},${a.y + H + 60} ${b.x + W / 2},${b.y + H + 60} ${b.x + W / 2},${b.y + H}`);
     svg.append(s('path', { d, class: 'edge', 'marker-end': 'url(#arr)' }));
-    const lx = self ? a.x + W : (x1 + x2) / 2, ly = self ? a.y - 22 : (y1 + y2) / 2 - 4 + (i % 2) * 10;
+    const back = !self && x2 <= x1;
+    const lx = self ? a.x + W : back ? (a.x + b.x + W) / 2 : (x1 + x2) / 2;
+    const ly = self ? a.y - 22 : back ? Math.max(a.y, b.y) + H + 42 : (y1 + y2) / 2 - 4 + (i % 2) * 10;
     svg.append(s('text', { x: lx, y: ly, class: 'edgelabel', 'text-anchor': 'middle' }, document.createTextNode((e.label || '').slice(0, 30))));
   });
   for (const n of nodes.values()) {

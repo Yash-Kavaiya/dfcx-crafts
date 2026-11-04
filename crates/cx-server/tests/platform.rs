@@ -54,6 +54,7 @@ fn multi_tenant_platform_lifecycle() {
     c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "Bank"}));
     assert_eq!(c.ok("GET", "/v3/projects", None).arr("projects").len(), 2);
     assert_eq!(c.call("POST", "/v3/projects", Some(&obj! {"displayName" => "x", "projectId" => "retail"})).0, 409);
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "Bank", "projectId" => "bank-eu"}));
 
     // agents in different locations / projects
     let a1 = c.ok("POST", "/v3/projects/retail/locations/global/agents", Some(&obj! {"displayName" => "Support", "timeZone" => "UTC"}));

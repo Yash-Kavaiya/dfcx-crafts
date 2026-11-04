@@ -68,7 +68,7 @@ fn singular(collection: &str) -> &str {
 
 /// Collections whose display names must be unique within the parent.
 fn unique_display(collection: &str) -> bool {
-    !matches!(collection, "results" | "changelogs" | "conversations" | "examples" | "sessions" | "versions" | "continuousTestResults")
+    !matches!(collection, "projects" | "results" | "changelogs" | "conversations" | "examples" | "sessions" | "versions" | "continuousTestResults")
 }
 
 /// Collections that may not be written through generic CRUD.

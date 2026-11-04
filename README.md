@@ -16,6 +16,22 @@ cargo build --release
 # console: http://127.0.0.1:8080/projects     API: http://127.0.0.1:8080/v3/projects
 ```
 
+## Deploy to Google Cloud Run
+
+The repository ships a production `Dockerfile` (distroless, non-root) and a
+GitHub Actions pipeline, `.github/workflows/deploy-cloud-run.yml`. The
+pipeline tests, builds, pushes to Artifact Registry, deploys to Cloud Run
+and smoke-tests the service on every push to `main`. It uses keyless
+Workload Identity Federation. The one-time setup is a single script:
+
+```bash
+PROJECT_ID=my-project ./deploy/gcp-setup.sh   # in Cloud Shell; then add the printed GitHub variables
+```
+
+See [docs/deploy-cloud-run.md](docs/deploy-cloud-run.md) for details:
+persistence via a Cloud Storage volume, the API key in Secret Manager,
+public chat sessions for the widget, and configuration.
+
 ## A platform, not one agent
 
 Resources follow the same hierarchy as the Google console and API:
@@ -96,7 +112,8 @@ Fulfillment runs, in order:
 ## CLI
 
 ```
-cxa serve [--addr 127.0.0.1:8080] [--data data/cxa-state.json | --memory] [--api-key KEY] [--seed AGENT.json ...]
+cxa serve [--addr 127.0.0.1:8080] [--data data/cxa-state.json | --memory] [--api-key KEY] [--public-sessions] [--seed AGENT ...]
+          # env fallbacks: PORT, CXA_ADDR, CXA_DATA, CXA_MEMORY, CXA_API_KEY, CXA_PUBLIC_SESSIONS, CXA_SEED
 cxa chat AGENT [--say "hi" --say "..."] [--debug]      # REPL: :params :reset :event NAME :debug :quit
 cxa test AGENT                                         # runs test cases, exit code reflects result
 cxa validate AGENT

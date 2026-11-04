@@ -16,3 +16,18 @@ jobs:
       - run: cargo run -q -p cxa -- test examples/travel-playbook-agent.json
       - run: cargo run -q -p cxa -- test examples/help-center-agent.json
       - run: node --check crates/cx-server/assets/app.js
+
+  docker:
+    # Validates the production image on every push / PR (deploys happen in
+    # deploy-cloud-run.yml on main).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t cxa:ci .
+      - name: Container smoke test
+        run: |
+          docker run -d --name cxa -p 8080:8080 -e CXA_SEED=/app/examples/pizza-agent.json cxa:ci
+          for i in $(seq 1 20); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS -X POST localhost:8080/v3/projects/demo/locations/global/agents/rusty-pizza/sessions/ci:detectIntent \
+            -H 'Content-Type: application/json' -d '{"queryInput":{"text":{"text":"hi"}}}' | grep -q "Rusty Pizza"
+          docker logs cxa

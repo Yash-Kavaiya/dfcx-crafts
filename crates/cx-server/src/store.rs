@@ -34,7 +34,8 @@ pub fn child_collections(parent_collection: &str) -> &'static [&'static str] {
     match parent_collection {
         "" => &["projects"],
         "projects" => &["locations"],
-        "locations" => &["agents", "securitySettings"],
+        "locations" => &["agents", "securitySettings", "dataStores"],
+        "dataStores" => &["documents"],
         "agents" => &[
             "flows",
             "intents",
@@ -205,7 +206,7 @@ pub fn bundle(d: &Data, agent: &str) -> Option<Value> {
             pv
         })
         .collect();
-    Some(obj! {
+    let mut out = obj! {
         "agent" => public(a),
         "flows" => Value::Array(flows),
         "intents" => list("intents"),
@@ -217,7 +218,27 @@ pub fn bundle(d: &Data, agent: &str) -> Option<Value> {
         "tools" => list("tools"),
         "testCases" => list("testCases"),
         "environments" => list("environments"),
-    })
+    };
+    attach_data_stores(d, agent, &mut out);
+    Some(out)
+}
+
+/// Adds the location's data stores that the bundle references (knowledge
+/// connectors, data-store tools), with their documents.
+pub fn attach_data_stores(d: &Data, agent: &str, b: &mut Value) {
+    let location = cx_core::name::parent_of(agent);
+    let text = b.to_string();
+    let stores: Vec<Value> = d
+        .list(location, "dataStores")
+        .into_iter()
+        .filter(|ds| text.contains(&format!("\"{}\"", ds.str("name"))))
+        .map(|ds| {
+            let mut v = public(ds);
+            v.set("documents", Value::Array(d.list(ds.str("name"), "documents").into_iter().map(public).collect()));
+            v
+        })
+        .collect();
+    b.set("dataStores", Value::Array(stores));
 }
 
 /// Replaces the content of `agent` with a normalised bundle. Keeps
@@ -259,6 +280,18 @@ pub fn restore(d: &mut Data, agent: &str, normalized: &Value) {
         d.put(&pv.str("name").to_string(), pv.clone());
         for e in exs.as_array().cloned().unwrap_or_default() {
             d.put(e.str("name"), e.clone());
+        }
+    }
+    for ds in normalized.arr("dataStores") {
+        let n = ds.str("name").to_string();
+        if n.is_empty() || d.get(&n).is_some() {
+            continue; // shared location resource: never overwrite an existing store
+        }
+        let mut dv = ds.clone();
+        let docs = dv.remove("documents").unwrap_or_default();
+        d.put(&n, dv);
+        for doc in docs.as_array().cloned().unwrap_or_default() {
+            d.put(doc.str("name"), doc.clone());
         }
     }
     for coll in ["intents", "entityTypes", "webhooks", "transitionRouteGroups", "generators", "tools", "testCases", "environments"] {

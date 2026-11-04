@@ -14,4 +14,5 @@ jobs:
       - run: cargo test --workspace
       - run: cargo run -q -p cxa -- test examples/pizza-agent.json
       - run: cargo run -q -p cxa -- test examples/travel-playbook-agent.json
+      - run: cargo run -q -p cxa -- test examples/help-center-agent.json
       - run: node --check crates/cx-server/assets/app.js

@@ -7,6 +7,7 @@
 
 pub mod entities;
 pub mod intents;
+pub mod search;
 pub mod system;
 pub mod text;
 

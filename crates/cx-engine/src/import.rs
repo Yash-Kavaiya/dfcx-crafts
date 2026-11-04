@@ -107,6 +107,7 @@ struct Resolver {
     generators: Aliases,
     playbooks: Aliases,
     tools: Aliases,
+    data_stores: Aliases,
 }
 
 fn well_known_id(collection: &str, display: &str) -> Option<&'static str> {
@@ -229,6 +230,36 @@ impl Resolver {
         }
     }
 
+    fn connections(&self, holder: &mut Value) {
+        for c in arr_mut(holder, "dataStoreConnections") {
+            let d = c.str("dataStore").to_string();
+            if let Some(n) = self.data_stores.get(&d) {
+                c.set("dataStore", n);
+            }
+            if c.str("dataStoreType").is_empty() {
+                c.set("dataStoreType", "UNSTRUCTURED");
+            }
+        }
+    }
+
+    fn knowledge(&self, holder: &mut Value, flow: Option<&str>) {
+        let Some(k) = holder.get_mut("knowledgeConnectorSettings") else { return };
+        self.connections(k);
+        if let Some(tf) = k.get_mut("triggerFulfillment") {
+            self.fulfillment(tf);
+        }
+        if let Some(p) = k.get("targetPage").and_then(Value::as_str).map(String::from) {
+            if !p.is_empty() {
+                k.set("targetPage", self.page(flow, &p));
+            }
+        }
+        if let Some(f) = k.get("targetFlow").and_then(Value::as_str).map(String::from) {
+            if !f.is_empty() {
+                k.set("targetFlow", self.flows.get(&f).unwrap_or(f));
+            }
+        }
+    }
+
     fn route_holder(&self, v: &mut Value, flow: Option<&str>) {
         for r in arr_mut(v, "transitionRoutes") {
             self.handler(r, flow);
@@ -257,7 +288,7 @@ pub fn normalize_bundle(input: &Value, agent_name: &str) -> Value {
     if !b.is_object() {
         b = Value::object();
     }
-    for k in ["flows", "intents", "entityTypes", "webhooks", "transitionRouteGroups", "generators", "playbooks", "tools", "testCases", "environments"] {
+    for k in ["flows", "intents", "entityTypes", "webhooks", "transitionRouteGroups", "generators", "playbooks", "tools", "testCases", "environments", "dataStores"] {
         ensure_array(&mut b, k);
     }
     // Agent
@@ -296,6 +327,7 @@ pub fn normalize_bundle(input: &Value, agent_name: &str) -> Value {
         generators: Aliases::default(),
         playbooks: Aliases::default(),
         tools: Aliases::default(),
+        data_stores: Aliases::default(),
     };
     // Pass 1: names
     let simple: [(&str, fn(&mut Resolver) -> &mut Aliases); 7] = [
@@ -317,6 +349,17 @@ pub fn normalize_bundle(input: &Value, agent_name: &str) -> Value {
     for coll in ["testCases", "environments"] {
         for v in arr_mut(&mut b, coll) {
             assign(agent_name, coll, v);
+        }
+    }
+    // Data stores live at location level, next to agents.
+    let location = cx_core::name::parent_of(agent_name).to_string();
+    for ds in arr_mut(&mut b, "dataStores") {
+        let display = ds.str("displayName").to_string();
+        let (dn, old) = assign(&location, "dataStores", ds);
+        r.data_stores.add(&dn, &old, &display);
+        ensure_array(ds, "documents");
+        for doc in arr_mut(ds, "documents") {
+            assign(&dn, "documents", doc);
         }
     }
     for f in arr_mut(&mut b, "flows") {
@@ -355,6 +398,10 @@ pub fn normalize_bundle(input: &Value, agent_name: &str) -> Value {
     // Pass 2: references
     for f in arr_mut(&mut b, "flows") {
         let fname = f.str("name").to_string();
+        r.knowledge(f, Some(&fname));
+        for p in arr_mut(f, "pages") {
+            r.knowledge(p, Some(&fname));
+        }
         r.route_holder(f, Some(&fname));
         for p in arr_mut(f, "pages") {
             r.route_holder(p, Some(&fname));
@@ -437,6 +484,11 @@ pub fn normalize_bundle(input: &Value, agent_name: &str) -> Value {
                     }
                 }
             }
+        }
+    }
+    for t in arr_mut(&mut b, "tools") {
+        if let Some(spec) = t.get_mut("dataStoreSpec") {
+            r.connections(spec);
         }
     }
     for tc in arr_mut(&mut b, "testCases") {

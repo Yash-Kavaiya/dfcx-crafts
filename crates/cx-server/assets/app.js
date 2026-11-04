@@ -197,9 +197,9 @@ async function importAgent(parent) {
 
 // ---------- agent shell ----------
 const SECTIONS = [
-  ['Build', [['flows', 'Flows'], ['playbooks', 'Playbooks'], ['tools', 'Tools'], ['intents', 'Intents'], ['entityTypes', 'Entity types'], ['transitionRouteGroups', 'Route groups'], ['webhooks', 'Webhooks'], ['generators', 'Generators']]],
+  ['Build', [['flows', 'Flows'], ['playbooks', 'Playbooks'], ['tools', 'Tools'], ['dataStores', 'Data stores'], ['intents', 'Intents'], ['entityTypes', 'Entity types'], ['transitionRouteGroups', 'Route groups'], ['webhooks', 'Webhooks'], ['generators', 'Generators']]],
   ['Test & deploy', [['testCases', 'Test cases'], ['environments', 'Environments'], ['validation', 'Validation']]],
-  ['Monitor', [['conversations', 'Conversation history'], ['changelogs', 'Change history']]],
+  ['Monitor', [['analytics', 'Analytics'], ['conversations', 'Conversation history'], ['changelogs', 'Change history']]],
   ['Manage', [['integrations', 'Integrations'], ['settings', 'Agent settings']]],
 ];
 async function agentShell(agent, rest, main) {
@@ -217,7 +217,7 @@ async function agentShell(agent, rest, main) {
     flows: flowsSection, intents: intentsSection, entityTypes: entitiesSection, webhooks: webhooksSection,
     transitionRouteGroups: groupsSection, generators: generatorsSection, playbooks: playbooksSection, tools: toolsSection,
     testCases: testsSection, environments: envSection, validation: validationSection, conversations: convSection,
-    changelogs: changelogSection, settings: settingsSection, integrations: integrationsSection,
+    changelogs: changelogSection, settings: settingsSection, integrations: integrationsSection, dataStores: dataStoresSection, analytics: analyticsSection,
   }[section];
   if (!fn) return main.append(h('div', { class: 'empty' }, 'Unknown section'));
   await fn(ctx, rest.slice(1), main);
@@ -326,6 +326,66 @@ async function entityOptions(ctx) {
   return [...ets.map(e => [e.name, '@' + e.displayName]), ...sys.map(s => ['projects/-/locations/-/agents/-/entityTypes/' + s.name.slice(1), s.name])];
 }
 
+// ---------- data stores & knowledge ----------
+const locationOf = agent => parentOf(agent);
+async function knowledgeEditor(ctx, holder, flow) {
+  const stores = await api.list(locationOf(ctx.agent) + '/dataStores');
+  const k = holder.knowledgeConnectorSettings = holder.knowledgeConnectorSettings || { enabled: false, dataStoreConnections: [] };
+  k.dataStoreConnections = k.dataStoreConnections || []; k.triggerFulfillment = k.triggerFulfillment || {};
+  const tOpts = await targetOptions(ctx, flow);
+  const ta = h('textarea', { rows: 2, placeholder: 'Optional. Leave empty to reply with the best answer, or use $request.knowledge.answers[0]', oninput: e => setTexts(k.triggerFulfillment, e.target.value) }); ta.value = getTexts(k.triggerFulfillment);
+  return h('div', { class: 'card' },
+    h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: k.enabled, onchange: e => k.enabled = e.target.checked }), 'Answer unmatched questions from data stores'),
+    h('div', { class: 'muted', style: 'margin:6px 0' }, 'Used when no intent route matches. ', h('a', { href: `#/${ctx.agent}/dataStores` }, 'Manage data stores')),
+    stores.length ? h('div', { class: 'row' }, stores.map(d => h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: k.dataStoreConnections.some(c => c.dataStore === d.name), onchange: e => {
+      k.dataStoreConnections = k.dataStoreConnections.filter(c => c.dataStore !== d.name);
+      if (e.target.checked) k.dataStoreConnections.push({ dataStoreType: d.type || 'UNSTRUCTURED', dataStore: d.name });
+    } }), d.displayName + ' (' + (d.type || 'UNSTRUCTURED').toLowerCase() + ')'))) : h('div', { class: 'muted' }, 'No data stores in this location yet.'),
+    field('Fulfillment', ta), field('Transition after answering', sel(tOpts, targetValue(k), v => applyTarget(k, v))));
+}
+async function dataStoresSection(ctx, rest, main) {
+  const loc = locationOf(ctx.agent);
+  if (rest[0]) return dataStoreDetail(ctx, `${loc}/dataStores/${rest[0]}`, main);
+  const stores = await api.list(loc + '/dataStores');
+  const type = h('select', null, h('option', { value: 'UNSTRUCTURED' }, 'Documents (unstructured text)'), h('option', { value: 'FAQ' }, 'FAQ (question / answer)'));
+  listPage(main, 'Data stores', stores, [['Name', d => h('b', null, d.displayName)], ['Type', d => d.type || 'UNSTRUCTURED'], ['Created', d => (d.createTime || '').slice(0, 10)]],
+    d => go(`/${ctx.agent}/dataStores/${idOf(d.name)}`), async () => { const r = await createNamed(loc + '/dataStores', 'data store', field('Type', type), () => ({ type: type.value, createTime: new Date().toISOString() })); if (r) go(`/${ctx.agent}/dataStores/${idOf(r.name)}`); },
+    h('span', { class: 'muted' }, 'Shared by all agents in ' + idOf(loc)));
+}
+async function dataStoreDetail(ctx, name, main) {
+  const ds = await api.get(name); const docs = await api.list(name + '/documents');
+  const faq = ds.type === 'FAQ';
+  main.append(header(ds.displayName, (faq ? 'FAQ' : 'Document') + ' data store · ' + docs.length + ' documents', deleteBtn(name, `/${ctx.agent}/dataStores`)));
+  // search tester
+  const q = h('input', { placeholder: 'Try a question…' }); const out = h('div');
+  const search = async () => { out.innerHTML = ''; if (!q.value.trim()) return; const r = await guard(() => api.post(name + ':search', { query: q.value, pageSize: 5 }));
+    out.append(r.results.length ? h('table', null, r.results.map(x => h('tr', null, h('td', { style: 'width:70px' }, h('span', { class: 'chip ' + (x.confidence >= 0.35 ? 'ok' : 'warn') }, x.confidence)), h('td', null, h('b', null, x.faqQuestion || x.title), h('div', null, x.snippet), x.uri ? h('a', { href: x.uri, target: '_blank', rel: 'noopener' }, x.uri) : null)))) : h('div', { class: 'muted' }, 'No results.')); };
+  q.onkeydown = e => { if (e.key === 'Enter') search(); };
+  main.append(h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Test search'), h('div', { class: 'row' }, h('div', { style: 'flex:1' }, q), h('button', { class: 'btn primary', onclick: search }, 'Search')), h('div', { class: 'muted', style: 'margin-top:6px' }, 'Answers with confidence ≥ 0.35 are used by knowledge connectors.'), out));
+  // add documents
+  const addDoc = async () => {
+    const t = h('input'); const u = h('input', { placeholder: 'https://… (optional)' }); const c = h('textarea', { rows: 8 });
+    const body = faq ? h('div', null, field('Question', t), field('Answer', c)) : h('div', null, field('Title', t), field('Source URL', u), field('Content (paragraphs are split into passages)', c));
+    const r = await modal(faq ? 'Add FAQ entry' : 'Add document', body, [['Add', 'primary', () => {
+      if (!t.value.trim() || !c.value.trim()) return toast('Both fields are required', true);
+      const doc = faq ? { displayName: t.value, structData: { question: t.value, answer: c.value } } : { displayName: t.value, title: t.value, uri: u.value, content: c.value };
+      return guard(() => api.post(name + '/documents:import', { documents: [doc] }), 'Added');
+    }]]);
+    if (r) render();
+  };
+  const importCsv = async () => {
+    const ta = h('textarea', { rows: 10, placeholder: 'question,answer\nWhat are your hours?,9am-5pm Monday to Friday' });
+    const r = await modal('Import FAQ CSV', h('div', null, h('p', { class: 'muted' }, 'Two columns: question, answer. A header row is optional; quote fields containing commas.'), ta), [['Import', 'primary', () => guard(() => api.post(name + '/documents:import', { faqCsv: ta.value }), 'Imported')]]);
+    if (r) render();
+  };
+  main.append(h('div', { class: 'row between' }, h('h2', null, 'Documents'), h('div', { class: 'row' }, faq ? h('button', { class: 'btn', onclick: importCsv }, 'Import CSV') : null, h('button', { class: 'btn primary', onclick: addDoc }, faq ? '+ FAQ entry' : '+ Document'))));
+  main.append(docs.length ? h('table', null, h('tr', null, h('th', null, faq ? 'Question' : 'Title'), h('th', null, faq ? 'Answer' : 'Content'), h('th', null, '')),
+    docs.map(d => h('tr', null, h('td', { style: 'width:30%' }, h('b', null, (d.structData || {}).question || d.title || d.displayName), d.uri ? h('div', { class: 'muted' }, d.uri) : null),
+      h('td', null, ((d.structData || {}).answer || d.content || '').slice(0, 260)),
+      h('td', null, h('button', { class: 'btn small danger', onclick: async () => { await guard(() => api.del(d.name), 'Deleted'); render(); } }, '✕')))))
+    : h('div', { class: 'empty' }, 'No documents yet.'));
+}
+
 // ---------- flows & pages ----------
 async function flowsSection(ctx, rest, main) {
   if (rest[0] && rest[1] === 'pages' && rest[2]) return pageEditor(ctx, `${ctx.agent}/flows/${rest[0]}`, `${ctx.agent}/flows/${rest[0]}/pages/${rest[2]}`, main);
@@ -352,7 +412,8 @@ async function flowDetail(ctx, flowName, main) {
         box.append(h('h2', null, 'Routes'), await routesEditor(ctx, f.transitionRoutes, flowName),
           h('h2', null, 'Route groups'), await groupsPicker(ctx, f, flowName),
           h('h2', null, 'Event handlers'), await handlersEditor(ctx, f.eventHandlers, flowName),
-          h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn primary', onclick: () => guard(() => api.patch(flowName, { transitionRoutes: f.transitionRoutes, eventHandlers: f.eventHandlers, transitionRouteGroups: f.transitionRouteGroups }, 'transitionRoutes,eventHandlers,transitionRouteGroups'), 'Saved') }, 'Save')));
+          h('h2', null, 'Knowledge connector (flow level)'), await knowledgeEditor(ctx, f, flowName),
+          h('div', { style: 'margin-top:14px' }, h('button', { class: 'btn primary', onclick: () => guard(() => api.patch(flowName, { transitionRoutes: f.transitionRoutes, eventHandlers: f.eventHandlers, transitionRouteGroups: f.transitionRouteGroups, knowledgeConnectorSettings: f.knowledgeConnectorSettings }, 'transitionRoutes,eventHandlers,transitionRouteGroups,knowledgeConnectorSettings'), 'Saved') }, 'Save')));
       }
       if (t === 'Route groups') {
         const gs = await ctx.list('transitionRouteGroups', flowName);
@@ -473,6 +534,7 @@ async function pageEditor(ctx, flowName, pageName, main) {
       box.append(h('h2', null, 'Routes'), await routesEditor(ctx, p.transitionRoutes, flowName, { defaultCondition: '$page.params.status = "FINAL"' }));
       box.append(h('h2', null, 'Route groups'), await groupsPicker(ctx, p, flowName));
       box.append(h('h2', null, 'Event handlers'), await handlersEditor(ctx, p.eventHandlers, flowName));
+      box.append(h('h2', null, 'Knowledge connector'), await knowledgeEditor(ctx, p, flowName));
       box.append(h('div', { style: 'margin-top:16px' }, h('button', { class: 'btn primary', onclick: save }, 'Save page')));
     })();
     return box;
@@ -660,8 +722,16 @@ async function toolsSection(ctx, rest, main) {
       const schema = h('textarea', { class: 'code', style: 'min-height:260px', oninput: e => { if (x.openApiSpec) x.openApiSpec.textSchema = e.target.value; else { try { x.functionSpec = JSON.parse(e.target.value); } catch (er) { } } } });
       schema.value = x.openApiSpec ? x.openApiSpec.textSchema || '' : JSON.stringify(x.functionSpec || { inputSchema: { type: 'object', properties: {} }, outputSchema: { type: 'object' } }, null, 2);
       main.append(h('div', { class: 'card' }, field('Display name', h('input', { value: x.displayName, oninput: e => x.displayName = e.target.value })), field('Description', h('textarea', { rows: 2, value: x.description || '', oninput: e => x.description = e.target.value })),
-        field('Type', sel([['openapi', 'OpenAPI (server-side HTTP)'], ['function', 'Function (client-side)']], x.functionSpec ? 'function' : 'openapi', v => { if (v === 'function') { delete x.openApiSpec; x.functionSpec = { inputSchema: { type: 'object' }, outputSchema: { type: 'object' } }; } else { delete x.functionSpec; x.openApiSpec = { textSchema: '' }; } render(); })),
-        field(x.functionSpec ? 'Function schema (JSON)' : 'OpenAPI schema (YAML or JSON)', schema)), h('h2', null, 'JSON'), jsonEditor(t, v => guard(() => api.patch(name, v), 'Saved')));
+        field('Type', sel([['openapi', 'OpenAPI (server-side HTTP)'], ['function', 'Function (client-side)'], ['datastore', 'Data store (search)']], x.functionSpec ? 'function' : x.dataStoreSpec ? 'datastore' : 'openapi', v => {
+          delete x.openApiSpec; delete x.functionSpec; delete x.dataStoreSpec;
+          if (v === 'function') x.functionSpec = { inputSchema: { type: 'object' }, outputSchema: { type: 'object' } };
+          else if (v === 'datastore') x.dataStoreSpec = { dataStoreConnections: [] };
+          else x.openApiSpec = { textSchema: '' };
+          guard(() => api.patch(name, x, 'openApiSpec,functionSpec,dataStoreSpec'), 'Tool type changed').then(render);
+        })),
+        x.dataStoreSpec ? h('div', null, h('label', { class: 'f' }, 'Data stores searched by this tool'), await (async () => { const stores = await api.list(locationOf(ctx.agent) + '/dataStores'); x.dataStoreSpec.dataStoreConnections = x.dataStoreSpec.dataStoreConnections || [];
+          return stores.length ? h('div', { class: 'row' }, stores.map(d => h('label', { class: 'inline' }, h('input', { type: 'checkbox', checked: x.dataStoreSpec.dataStoreConnections.some(c => c.dataStore === d.name), onchange: e => { x.dataStoreSpec.dataStoreConnections = x.dataStoreSpec.dataStoreConnections.filter(c => c.dataStore !== d.name); if (e.target.checked) x.dataStoreSpec.dataStoreConnections.push({ dataStoreType: d.type || 'UNSTRUCTURED', dataStore: d.name }); } }), d.displayName))) : h('div', { class: 'muted' }, 'No data stores yet.'); })())
+          : field(x.functionSpec ? 'Function schema (JSON)' : 'OpenAPI schema (YAML or JSON)', schema)), h('h2', null, 'JSON'), jsonEditor(t, v => guard(() => api.patch(name, v), 'Saved')));
     });
 }
 
@@ -721,6 +791,67 @@ async function validationSection(ctx, rest, main) {
   main.append(h('h2', null, 'Agent'), table(r.agentValidationMessages || []));
   for (const f of r.flowValidationResults || []) main.append(h('h2', null, 'Flow: ' + f.flowDisplayName), table(f.validationMessages || []));
 }
+// ---------- analytics ----------
+const tip = (() => { let t; return { show(e, html) { if (!t) { t = h('div', { class: 'tip', role: 'tooltip' }); document.body.append(t); } t.innerHTML = html; t.style.display = 'block'; t.style.left = Math.min(e.clientX + 12, innerWidth - t.offsetWidth - 8) + 'px'; t.style.top = (e.clientY + 14) + 'px'; }, hide() { if (t) t.style.display = 'none'; } }; })();
+const escHtml = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function statTile(label, value, sub) { return h('div', { class: 'stat' }, h('div', { class: 'stat-l' }, label), h('div', { class: 'stat-v' }, value), sub ? h('div', { class: 'stat-s' }, sub) : null); }
+const pct = x => (Math.round(x * 1000) / 10) + '%';
+function hbars(rows, fmt) {
+  if (!rows.length) return h('div', { class: 'muted' }, 'No data yet.');
+  const max = Math.max(...rows.map(r => r.count), 1);
+  return h('div', { class: 'hbars' }, rows.map(r => h('div', { class: 'hbar', onmousemove: e => tip.show(e, `<b>${escHtml(r.name)}</b><br>${r.count} turns${r.avgConfidence != null ? ' · avg confidence ' + r.avgConfidence : ''}`), onmouseleave: () => tip.hide() },
+    h('div', { class: 'hbar-l', title: r.name }, r.name || '—'), h('div', { class: 'hbar-t' }, h('div', { class: 'hbar-f', style: `width:${Math.max(2, (r.count / max) * 100)}%` })), h('div', { class: 'hbar-v' }, fmt ? fmt(r) : r.count))));
+}
+function columnChart(series) {
+  const max = Math.max(...series.map(d => d.turns), 0);
+  const cols = h('div', { class: 'cols', role: 'img', 'aria-label': 'Turns per day' }, series.map(d => h('div', { class: 'colw', onmousemove: e => tip.show(e, `<b>${d.date}</b><br>${d.turns} turn${d.turns === 1 ? '' : 's'}`), onmouseleave: () => tip.hide() },
+    d.turns ? h('div', { class: 'colb', style: `height:${(d.turns / max) * 100}%` }) : null)));
+  const n = series.length; const mid = Math.floor(n / 2);
+  const axis = h('div', { class: 'colx' }, h('span', null, series[0] ? series[0].date.slice(5) : ''), h('span', null, series[mid] ? series[mid].date.slice(5) : ''), h('span', null, series[n - 1] ? series[n - 1].date.slice(5) : ''));
+  const table = h('details', null, h('summary', { class: 'muted' }, 'Show as table'), h('table', null, h('tr', null, h('th', null, 'Date'), h('th', null, 'Turns')), series.slice().reverse().map(d => h('tr', null, h('td', null, d.date), h('td', null, d.turns)))));
+  return h('div', null, h('div', { class: 'colchart' }, h('div', { class: 'coly' }, max ? 'max ' + max : 'no turns yet'), cols, axis), table);
+}
+async function analyticsSection(ctx, rest, main) {
+  S.an = S.an || { days: 30, env: '' };
+  const envs = await ctx.list('environments');
+  const q = { days: S.an.days }; if (S.an.env) q.environment = S.an.env;
+  const a = await api.get(ctx.agent + '/analytics', q);
+  const s = a.summary;
+  main.append(header('Analytics', `Last ${a.days} days · ${S.an.env ? 'environment ' + idOf(S.an.env) : 'draft'} · based on conversation history`));
+  main.append(h('div', { class: 'row filters', style: 'margin-bottom:12px' },
+    h('span', { class: 'muted' }, 'Range'), sel([['7', 'Last 7 days'], ['30', 'Last 30 days'], ['90', 'Last 90 days']], String(S.an.days), v => { S.an.days = +v; render(); }),
+    h('span', { class: 'muted' }, 'Environment'), sel([['', 'Draft'], ...envs.map(e => [e.name, e.displayName])], S.an.env, v => { S.an.env = v; render(); })));
+  main.append(h('div', { class: 'stats' },
+    statTile('Conversations', s.sessions), statTile('Turns', s.turns, s.avgTurnsPerSession + ' per conversation'),
+    statTile('No-match rate', pct(s.noMatchRate), 'of text inputs'), statTile('Completed', s.endedSessions, 'reached end of session'),
+    statTile('Live agent handoffs', s.liveAgentHandoffs), statTile('Webhook errors', pct(s.webhookErrorRate), s.webhookCalls + (s.webhookCalls === 1 ? ' call' : ' calls'))));
+  main.append(h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Turns per day'), columnChart(a.turnsPerDay)));
+  main.append(h('div', { class: 'grid2' },
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Match types'), hbars(a.matchTypes.sort((x, y) => y.count - x.count))),
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Top intents'), hbars(a.topIntents, r => `${r.count} · ${Math.round(r.avgConfidence * 100)}% conf.`)),
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Most visited pages'), hbars(a.topPages)),
+    h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'Drop-off pages'), h('div', { class: 'muted', style: 'margin:-4px 0 8px' }, 'Where conversations that did not end were last seen'), hbars(a.dropOffPages))));
+  const intents = await ctx.list('intents');
+  const addTo = u => {
+    const pick = sel([['', 'Add to intent…'], ...intents.map(i => [i.name, i.displayName])], '', async v => {
+      if (!v) return;
+      const it = await api.get(v);
+      const phrases = [{ parts: [{ text: u.text }], repeatCount: 1 }, ...(it.trainingPhrases || [])];
+      await guard(() => api.patch(v, { trainingPhrases: phrases }, 'trainingPhrases'), `Added to ${it.displayName}`);
+      pick.value = '';
+    });
+    return pick;
+  };
+  const rows = a.recentUnmatched.map(u => h('tr', null,
+    h('td', { style: 'width:170px' }, u.time.replace('T', ' ').slice(0, 19)),
+    h('td', null, u.text),
+    h('td', { style: 'width:260px' }, addTo(u))));
+  main.append(h('div', { class: 'card' },
+    h('h2', { style: 'margin-top:0' }, 'Recent unmatched user inputs'),
+    h('div', { class: 'muted', style: 'margin:-4px 0 8px' }, 'Add them as training phrases to improve coverage.'),
+    rows.length ? h('table', null, h('tr', null, h('th', null, 'Time'), h('th', null, 'User said'), h('th', null, '')), rows) : h('div', { class: 'muted' }, 'Nothing unmatched in this period.')));
+}
+
 async function convSection(ctx, rest, main) {
   if (rest[0]) {
     const c = await api.get(`${ctx.agent}/conversations/${rest[0]}`);
@@ -755,6 +886,19 @@ async function settingsSection(ctx, rest, main) {
     field('Start resource', sel([...flows.map(f => ['flow:' + f.name, 'Flow: ' + f.displayName]), ...pbs.map(p => ['pb:' + p.name, 'Playbook: ' + p.displayName])], startVal, v => { if (v.startsWith('pb:')) { x.startPlaybook = v.slice(3); delete x.startFlow; } else { x.startFlow = v.slice(5); delete x.startPlaybook; } })),
     field('NLU classification threshold', h('input', { type: 'number', step: '0.05', min: 0, max: 1, value: x.nluSettings.classificationThreshold ?? 0.3, oninput: e => x.nluSettings.classificationThreshold = +e.target.value })),
     h('label', { class: 'inline', style: 'margin-top:10px' }, h('input', { type: 'checkbox', checked: ((x.advancedSettings || {}).loggingSettings || {}).enableInteractionLogging !== false, onchange: e => { x.advancedSettings = x.advancedSettings || {}; x.advancedSettings.loggingSettings = Object.assign({}, x.advancedSettings.loggingSettings, { enableInteractionLogging: e.target.checked }); } }), 'Log conversation history')));
+  // security settings (location level)
+  const secs = await api.list(parentOf(ctx.agent) + '/securitySettings');
+  const secSel = sel([['', '— none —'], ...secs.map(x => [x.name, x.displayName])], x.securitySettings || '', v => { x.securitySettings = v || undefined; });
+  main.append(h('h2', null, 'Security'), h('div', { class: 'card' },
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'Parameters marked Redact (on pages, intents or entity types) are masked in conversation history. Security settings add retention and purge rules.'),
+    field('Security settings', secSel),
+    h('button', { class: 'btn small', style: 'margin-top:8px', onclick: async () => {
+      const dn = h('input', { placeholder: 'e.g. 30-day retention' }); const days = h('input', { type: 'number', min: 0, value: 30 });
+      const purge = h('input', { type: 'checkbox' });
+      const r = await modal('New security settings', h('div', null, field('Display name', dn), field('Retention window (days, 0 = keep)', days), h('label', { class: 'inline', style: 'margin-top:10px' }, purge, 'Do not store conversation history')),
+        [['Create', 'primary', () => guard(() => api.post(parentOf(ctx.agent) + '/securitySettings', { displayName: dn.value || 'Security settings', retentionWindowDays: +days.value || undefined, purgeDataTypes: purge.checked ? ['DIALOGFLOW_HISTORY'] : [], redactionScope: 'REDACT_DISK_STORAGE' }))]]);
+      if (r) { x.securitySettings = r.name; await guard(() => api.patch(ctx.agent, x), 'Security settings attached'); render(); }
+    } }, '+ New security settings')));
   main.append(h('h2', null, 'Import / export'), h('div', { class: 'row' },
     h('button', { class: 'btn', onclick: async () => { const r = await api.get(ctx.agent + ':export'); download(slug(a.displayName) + '.agent.json', JSON.stringify(r.response.agentContent, null, 2)); } }, 'Export agent (JSON)'),
     h('button', { class: 'btn', onclick: async () => { const r = await api.post(ctx.agent + ':export', { dataFormat: 'JSON_PACKAGE' }); downloadBase64(slug(a.displayName) + '.zip', r.response.agentContent, 'application/zip'); } }, 'Export JSON package (.zip)'),

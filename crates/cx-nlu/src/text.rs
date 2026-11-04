@@ -62,8 +62,15 @@ pub fn stem(w: &str) -> String {
     if s.chars().any(|c| c.is_ascii_digit()) || n <= 3 {
         return s;
     }
+    if n > 6 && s.ends_with("ally") {
+        s.truncate(s.len() - 2);
+    } else if n > 5 && s.ends_with("ly") && !s.ends_with("ply") {
+        s.truncate(s.len() - 2);
+    }
+    let n = s.chars().count();
     if n > 5 && s.ends_with("ing") {
         s.truncate(s.len() - 3);
+        undouble(&mut s);
     } else if s.ends_with("ies") && n > 4 {
         s.truncate(s.len() - 3);
         s.push('y');
@@ -71,10 +78,20 @@ pub fn stem(w: &str) -> String {
         s.truncate(s.len() - 2);
     } else if s.ends_with("ed") && n > 4 {
         s.truncate(s.len() - 2);
+        undouble(&mut s);
     } else if s.ends_with('s') && !s.ends_with("ss") && !s.ends_with("us") && !s.ends_with("is") {
         s.truncate(s.len() - 1);
     }
     s
+}
+
+/// "shipp" -> "ship", "stopp" -> "stop" (but keep "ll", "ss", "zz").
+fn undouble(s: &mut String) {
+    let b = s.as_bytes();
+    let n = b.len();
+    if n >= 3 && b[n - 1] == b[n - 2] && b[n - 1].is_ascii_alphabetic() && !matches!(b[n - 1], b'l' | b's' | b'z' | b'a' | b'e' | b'i' | b'o' | b'u') {
+        s.pop();
+    }
 }
 
 pub const STOPWORDS: &[&str] = &[
@@ -151,6 +168,12 @@ mod tests {
         assert_eq!(stem("boxes"), "box");
         assert_eq!(stem("booked"), "book");
         assert_eq!(stem("glass"), "glass");
+        assert_eq!(stem("shipping"), "ship");
+        assert_eq!(stem("ship"), "ship");
+        assert_eq!(stem("stopped"), "stop");
+        assert_eq!(stem("internationally"), "international");
+        assert_eq!(stem("quickly"), "quick");
+        assert_eq!(stem("calling"), "call");
     }
     #[test]
     fn fuzzy() {

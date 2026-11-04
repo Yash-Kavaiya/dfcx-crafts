@@ -229,3 +229,102 @@ fn messenger_widget_is_served_and_demo_validates_input() {
     let (s, _) = c.call("GET", "/messenger/demo?agent=x%22%3E%3Cscript%3E", None);
     assert_eq!(s, 400);
 }
+
+#[test]
+fn data_stores_and_knowledge_connectors_over_http() {
+    let c = Client::start();
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "K", "projectId" => "k"}));
+    let loc = "projects/k/locations/global";
+    let ds = c.ok("POST", &format!("/v3/{}/dataStores", loc), Some(&obj! {"displayName" => "faq", "type" => "FAQ"}));
+    let dsn = ds.str("name").to_string();
+    let imp = c.ok("POST", &format!("/v3/{}/documents:import", dsn), Some(&obj! {"faqCsv" => "question,answer\nIs parking free?,\"Yes, parking is free for customers.\"\nDo you have wifi?,Free wifi is available in every store.\n"}));
+    assert_eq!(imp.at("response").f64_field("importedCount"), Some(2.0));
+    let s = c.ok("POST", &format!("/v3/{}:search", dsn), Some(&obj! {"query" => "is there wifi"}));
+    assert_eq!(s.arr("results")[0].str("snippet"), "Free wifi is available in every store.");
+
+    // a new agent whose start flow uses the data store
+    let a = c.ok("POST", &format!("/v3/{}/agents", loc), Some(&obj! {"displayName" => "Store bot"}));
+    let an = a.str("name").to_string();
+    let flow = c.ok("GET", &format!("/v3/{}/flows", an), None).arr("flows")[0].str("name").to_string();
+    c.ok(
+        "PATCH",
+        &format!("/v3/{}?updateMask=knowledgeConnectorSettings", flow),
+        Some(&obj! {"knowledgeConnectorSettings" => obj!{"enabled" => true, "dataStoreConnections" => cx_core::arr![obj!{"dataStoreType" => "FAQ", "dataStore" => dsn.clone()}]}}),
+    );
+    let r = c.say(&format!("{}/sessions/s", an), "can I park for free?");
+    assert_eq!(texts(&r), vec!["Yes, parking is free for customers."]);
+    // export carries the referenced data store; importing elsewhere recreates it
+    let exp = c.ok("POST", &format!("/v3/{}:export", an), Some(&obj! {}));
+    let content = exp.at("response").at("agentContent").clone();
+    assert_eq!(content.arr("dataStores").len(), 1);
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "K2", "projectId" => "k2"}));
+    c.ok("POST", "/v3/projects/k2/locations/global/agents:import", Some(&obj! {"agentContent" => content, "agentId" => "copy"}));
+    let r = c.say("projects/k2/locations/global/agents/copy/sessions/s", "do you have wifi?");
+    assert_eq!(texts(&r), vec!["Free wifi is available in every store."]);
+    assert_eq!(c.ok("GET", "/v3/projects/k2/locations/global/dataStores", None).arr("dataStores").len(), 1);
+    // the help-center example imports with both stores and passes its tests
+    let help = Value::parse(include_str!("../../../examples/help-center-agent.json")).unwrap();
+    c.ok("POST", &format!("/v3/{}/agents:import", loc), Some(&obj! {"agentContent" => help, "agentId" => "help"}));
+    let run = c.ok("POST", &format!("/v3/{}/agents/help/testCases:batchRun", loc), Some(&obj! {}));
+    for res in run.at("response").arr("results") {
+        assert_eq!(res.str("testResult"), "PASSED", "{}", res.to_pretty());
+    }
+}
+
+#[test]
+fn redaction_and_security_settings() {
+    let c = Client::start();
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "R", "projectId" => "r"}));
+    let bundle = Value::parse(
+        r#"{"agent": {"displayName": "Bank"},
+        "entityTypes": [{"displayName": "pin", "kind": "KIND_REGEXP", "redact": true, "entities": [{"value": "\\d{4}", "synonyms": ["\\d{4}"]}]}],
+        "flows": [{"displayName": "Default Start Flow",
+          "transitionRoutes": [{"condition": "true", "targetPage": "Verify"}],
+          "pages": [{"displayName": "Verify", "form": {"parameters": [
+              {"displayName": "pin", "entityType": "@pin", "required": true, "fillBehavior": {"initialPromptFulfillment": {"messages": [{"text": {"text": ["Your PIN?"]}}]}}},
+              {"displayName": "email", "entityType": "@sys.email", "required": true, "redact": true, "fillBehavior": {"initialPromptFulfillment": {"messages": [{"text": {"text": ["Email?"]}}]}}}]},
+            "transitionRoutes": [{"condition": "$page.params.status = \"FINAL\"", "triggerFulfillment": {"messages": [{"text": {"text": ["Verified $session.params.email with PIN $session.params.pin."]}}]}, "targetPage": "END_SESSION"}]}]}]}"#,
+    )
+    .unwrap();
+    c.ok("POST", "/v3/projects/r/locations/global/agents:import", Some(&obj! {"agentContent" => bundle, "agentId" => "bank"}));
+    let s = "projects/r/locations/global/agents/bank/sessions/x";
+    c.say(s, "hello");
+    c.say(s, "it is 9876");
+    let r = c.say(s, "ada@example.com");
+    // the caller still receives real values
+    assert_eq!(texts(&r), vec!["Verified ada@example.com with PIN 9876."]);
+    // ...but conversation history is redacted
+    let conv = c.ok("GET", "/v3/projects/r/locations/global/agents/bank/conversations/x", None).to_string();
+    assert!(!conv.contains("9876") && !conv.contains("ada@example.com"), "{}", conv);
+    assert!(conv.contains("[redacted]"));
+    // security settings that purge history stop logging entirely
+    let sec = c.ok("POST", "/v3/projects/r/locations/global/securitySettings", Some(&obj! {"displayName" => "no-history", "purgeDataTypes" => cx_core::arr!["DIALOGFLOW_HISTORY"]}));
+    c.ok("PATCH", "/v3/projects/r/locations/global/agents/bank?updateMask=securitySettings", Some(&obj! {"securitySettings" => sec.str("name")}));
+    c.say("projects/r/locations/global/agents/bank/sessions/y", "hello");
+    assert_eq!(c.call("GET", "/v3/projects/r/locations/global/agents/bank/conversations/y", None).0, 404);
+}
+
+#[test]
+fn analytics_aggregates_conversations() {
+    let c = Client::start();
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "A", "projectId" => "a"}));
+    let pizza = Value::parse(include_str!("../../../examples/pizza-agent.json")).unwrap();
+    c.ok("POST", "/v3/projects/a/locations/global/agents:import", Some(&obj! {"agentContent" => pizza, "agentId" => "p"}));
+    let base = "projects/a/locations/global/agents/p";
+    c.say(&format!("{}/sessions/1", base), "hi");
+    c.say(&format!("{}/sessions/1", base), "what's the weather like on mars");
+    c.say(&format!("{}/sessions/2", base), "order pizza");
+    c.say(&format!("{}/sessions/2", base), "cancel");
+    let a = c.ok("GET", &format!("/v3/{}/analytics?days=7", base), None);
+    let s = a.at("summary");
+    assert_eq!(s.f64_field("sessions"), Some(2.0));
+    assert_eq!(s.f64_field("turns"), Some(4.0));
+    assert_eq!(s.f64_field("noMatchRate"), Some(0.25));
+    assert_eq!(s.f64_field("endedSessions"), Some(1.0));
+    assert_eq!(a.arr("recentUnmatched")[0].str("text"), "what's the weather like on mars");
+    assert!(a.arr("topIntents").iter().any(|i| i.str("name") == "order.pizza"));
+    assert_eq!(a.arr("turnsPerDay").len(), 7);
+    assert_eq!(a.arr("turnsPerDay")[6].f64_field("turns"), Some(4.0));
+    assert_eq!(a.arr("dropOffPages")[0].str("name"), "Default Start Flow › Start Page");
+    assert_eq!(c.call("GET", "/v3/projects/a/locations/global/agents/missing/analytics", None).0, 404);
+}

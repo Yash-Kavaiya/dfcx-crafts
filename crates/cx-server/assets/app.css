@@ -127,3 +127,27 @@ td input, td select, td textarea { padding: 5px 7px; }
   .sim { position: fixed; right: 0; top: 52px; bottom: 0; width: min(380px, 100vw); z-index: 10; }
   .main { padding: 16px; }
 }
+
+/* analytics */
+.stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 12px; margin-bottom: 4px; }
+.stat { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; }
+.stat-l { color: var(--muted); font-size: 12.5px; }
+.stat-v { font-size: 26px; font-weight: 500; margin-top: 2px; font-variant-numeric: tabular-nums; }
+.stat-s { color: var(--muted); font-size: 12px; }
+.grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 0 12px; }
+.hbars { display: flex; flex-direction: column; gap: 2px; }
+.hbar { display: grid; grid-template-columns: minmax(90px, 38%) 1fr auto; gap: 8px; align-items: center; padding: 3px 0; cursor: default; }
+.hbar:hover .hbar-f { filter: brightness(1.12); }
+.hbar-l { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+.hbar-t { height: 10px; }
+.hbar-f { height: 10px; background: var(--primary); border-radius: 0 4px 4px 0; }
+.hbar-v { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 2.5em; text-align: right; }
+.filters select { width: auto; min-width: 150px; }
+.colchart { position: relative; padding: 18px 4px 0; }
+.coly { position: absolute; top: 0; left: 4px; font-size: 11px; color: var(--muted); }
+.cols { height: 160px; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid var(--border); background: linear-gradient(var(--border) 1px, transparent 1px) 0 0 / 100% 100% no-repeat; }
+.colw { flex: 1; height: 100%; display: flex; align-items: flex-end; min-width: 3px; }
+.colw:hover { background: color-mix(in srgb, var(--primary) 8%, transparent); }
+.colb { width: 100%; background: var(--primary); border-radius: 4px 4px 0 0; min-height: 2px; }
+.colx { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); padding-top: 4px; }
+.tip { position: fixed; z-index: 40; pointer-events: none; background: var(--surface); color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: 6px; padding: 6px 9px; font-size: 12.5px; display: none; }

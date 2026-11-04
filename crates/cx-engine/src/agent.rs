@@ -225,3 +225,129 @@ impl Agent {
         out
     }
 }
+
+impl Agent {
+    /// Names of parameters whose values must not be stored in logs: form
+    /// and intent parameters marked `redact`, and parameters whose entity
+    /// type is marked `redact`.
+    pub fn redacted_parameters(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let redacted_type = |et: &str| self.entity_type(&self.entity_key(et)).map_or(false, |e| e.bool_field("redact"));
+        let mut add = |n: &str| {
+            if !n.is_empty() && !out.iter().any(|x| x == n) {
+                out.push(n.to_string());
+            }
+        };
+        for f in self.flows() {
+            for p in f.arr("pages") {
+                for fp in p.at("form").arr("parameters") {
+                    if fp.bool_field("redact") || redacted_type(fp.str("entityType")) {
+                        add(fp.str("displayName"));
+                    }
+                }
+            }
+        }
+        for it in self.intents() {
+            for p in it.arr("parameters") {
+                if p.bool_field("redact") || redacted_type(p.str("entityType")) {
+                    add(p.str("id"));
+                }
+            }
+        }
+        out
+    }
+}
+
+/// Masks redacted parameters inside a logged interaction: the parameter
+/// entries themselves and any occurrence of their values in text.
+pub fn redact_value(v: &Value, params: &[String]) -> Value {
+    if params.is_empty() {
+        return v.clone();
+    }
+    const MASK: &str = "[redacted]";
+    let mut secrets: Vec<String> = Vec::new();
+    fn collect(v: &Value, params: &[String], out: &mut Vec<String>) {
+        match v {
+            Value::Object(m) => {
+                for (k, x) in m.iter() {
+                    if params.iter().any(|p| p == k) {
+                        leaf_strings(x, out);
+                    } else {
+                        collect(x, params, out);
+                    }
+                }
+            }
+            Value::Array(a) => a.iter().for_each(|x| collect(x, params, out)),
+            _ => {}
+        }
+    }
+    fn leaf_strings(v: &Value, out: &mut Vec<String>) {
+        match v {
+            Value::String(s) if s.chars().count() >= 3 => out.push(s.clone()),
+            Value::Number(n) => {
+                let s = cx_core::json::format_number(*n);
+                if s.len() >= 3 {
+                    out.push(s);
+                }
+            }
+            Value::Object(m) => m.values().for_each(|x| leaf_strings(x, out)),
+            Value::Array(a) => a.iter().for_each(|x| leaf_strings(x, out)),
+            _ => {}
+        }
+    }
+    collect(v, params, &mut secrets);
+    secrets.sort_by_key(|s| std::cmp::Reverse(s.len()));
+    secrets.dedup();
+    fn mask(v: &Value, params: &[String], secrets: &[String]) -> Value {
+        match v {
+            Value::Object(m) => Value::Object(
+                m.iter()
+                    .map(|(k, x)| {
+                        // the whole value, including {original, resolved} objects
+                        if params.iter().any(|p| p == k) {
+                            (k.clone(), Value::from(MASK))
+                        } else {
+                            (k.clone(), mask(x, params, secrets))
+                        }
+                    })
+                    .collect(),
+            ),
+            Value::Array(a) => Value::Array(a.iter().map(|x| mask(x, params, secrets)).collect()),
+            Value::String(s) => {
+                let mut t = s.clone();
+                for sec in secrets {
+                    if t.contains(sec.as_str()) {
+                        t = t.replace(sec.as_str(), MASK);
+                    }
+                }
+                Value::String(t)
+            }
+            other => other.clone(),
+        }
+    }
+    mask(v, params, &secrets)
+}
+
+#[cfg(test)]
+mod redact_tests {
+    use super::*;
+    use cx_core::obj;
+
+    #[test]
+    fn masks_params_and_their_values_in_text() {
+        let entry = obj! {
+            "request" => obj!{"queryInput" => obj!{"text" => obj!{"text" => "my card is 4111111111111111"}}},
+            "response" => obj!{"queryResult" => obj!{
+                "parameters" => obj!{"card" => "4111111111111111", "name" => "Ada"},
+                "responseMessages" => cx_core::arr![obj!{"text" => obj!{"text" => cx_core::arr!["Charged card 4111111111111111."]}}],
+                "match" => obj!{"parameters" => obj!{"card" => obj!{"original" => "4111111111111111"}}},
+            }},
+        };
+        let r = redact_value(&entry, &["card".to_string()]);
+        let s = r.to_string();
+        assert!(!s.contains("4111111111111111"), "{}", s);
+        assert!(s.contains("Ada"));
+        assert_eq!(r.at("response").at("queryResult").at("parameters").str("card"), "[redacted]");
+        assert_eq!(r.at("request").at("queryInput").at("text").str("text"), "my card is [redacted]");
+    }
+}

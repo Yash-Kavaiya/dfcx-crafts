@@ -270,3 +270,36 @@ fn data_stores_and_knowledge_connectors_over_http() {
         assert_eq!(res.str("testResult"), "PASSED", "{}", res.to_pretty());
     }
 }
+
+#[test]
+fn redaction_and_security_settings() {
+    let c = Client::start();
+    c.ok("POST", "/v3/projects", Some(&obj! {"displayName" => "R", "projectId" => "r"}));
+    let bundle = Value::parse(
+        r#"{"agent": {"displayName": "Bank"},
+        "entityTypes": [{"displayName": "pin", "kind": "KIND_REGEXP", "redact": true, "entities": [{"value": "\\d{4}", "synonyms": ["\\d{4}"]}]}],
+        "flows": [{"displayName": "Default Start Flow",
+          "transitionRoutes": [{"condition": "true", "targetPage": "Verify"}],
+          "pages": [{"displayName": "Verify", "form": {"parameters": [
+              {"displayName": "pin", "entityType": "@pin", "required": true, "fillBehavior": {"initialPromptFulfillment": {"messages": [{"text": {"text": ["Your PIN?"]}}]}}},
+              {"displayName": "email", "entityType": "@sys.email", "required": true, "redact": true, "fillBehavior": {"initialPromptFulfillment": {"messages": [{"text": {"text": ["Email?"]}}]}}}]},
+            "transitionRoutes": [{"condition": "$page.params.status = \"FINAL\"", "triggerFulfillment": {"messages": [{"text": {"text": ["Verified $session.params.email with PIN $session.params.pin."]}}]}, "targetPage": "END_SESSION"}]}]}]}"#,
+    )
+    .unwrap();
+    c.ok("POST", "/v3/projects/r/locations/global/agents:import", Some(&obj! {"agentContent" => bundle, "agentId" => "bank"}));
+    let s = "projects/r/locations/global/agents/bank/sessions/x";
+    c.say(s, "hello");
+    c.say(s, "it is 9876");
+    let r = c.say(s, "ada@example.com");
+    // the caller still receives real values
+    assert_eq!(texts(&r), vec!["Verified ada@example.com with PIN 9876."]);
+    // ...but conversation history is redacted
+    let conv = c.ok("GET", "/v3/projects/r/locations/global/agents/bank/conversations/x", None).to_string();
+    assert!(!conv.contains("9876") && !conv.contains("ada@example.com"), "{}", conv);
+    assert!(conv.contains("[redacted]"));
+    // security settings that purge history stop logging entirely
+    let sec = c.ok("POST", "/v3/projects/r/locations/global/securitySettings", Some(&obj! {"displayName" => "no-history", "purgeDataTypes" => cx_core::arr!["DIALOGFLOW_HISTORY"]}));
+    c.ok("PATCH", "/v3/projects/r/locations/global/agents/bank?updateMask=securitySettings", Some(&obj! {"securitySettings" => sec.str("name")}));
+    c.say("projects/r/locations/global/agents/bank/sessions/y", "hello");
+    assert_eq!(c.call("GET", "/v3/projects/r/locations/global/agents/bank/conversations/y", None).0, 404);
+}

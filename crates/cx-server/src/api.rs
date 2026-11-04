@@ -806,14 +806,30 @@ impl Api {
         let resp = self.runtime.detect_intent(&compiled, session, &mut st, body);
         let mut d = self.store.data.lock().unwrap();
         d.sessions.insert(session.to_string(), st.to_json());
-        let logging = compiled.raw.at("advancedSettings").at("loggingSettings").get("enableInteractionLogging").and_then(Value::as_bool).unwrap_or(true);
+        let mut logging = compiled.raw.at("advancedSettings").at("loggingSettings").get("enableInteractionLogging").and_then(Value::as_bool).unwrap_or(true);
+        // Security settings referenced by the agent: purge / retention.
+        let security = d.get(compiled.raw.str("securitySettings")).cloned().unwrap_or_default();
+        if security.arr("purgeDataTypes").iter().any(|t| t.as_str() == Some("DIALOGFLOW_HISTORY")) {
+            logging = false;
+        }
         if logging {
             let entry = obj! {"request" => body.clone(), "response" => resp.clone(), "createTime" => cx_core::time::now_rfc3339(), "environment" => env.clone()};
+            let entry = cx_engine::agent::redact_value(&entry, &compiled.redacted_parameters());
             let t = d.transcripts.entry(session.to_string()).or_default();
             t.push(entry);
             if t.len() > 500 {
                 t.remove(0);
             }
+        }
+        if let Some(days) = security.f64_field("retentionWindowDays").filter(|d| *d > 0.0) {
+            let cutoff = cx_core::time::rfc3339_millis(cx_core::time::now_millis() - (days * 86_400_000.0) as i64);
+            let prefix = format!("{}/", agent);
+            for (k, t) in d.transcripts.iter_mut() {
+                if k.starts_with(&prefix) {
+                    t.retain(|e| e.str("createTime") >= cutoff.as_str());
+                }
+            }
+            d.transcripts.retain(|_, t| !t.is_empty());
         }
         self.commit(&d);
         Ok(resp)

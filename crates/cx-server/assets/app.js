@@ -825,6 +825,19 @@ async function settingsSection(ctx, rest, main) {
     field('Start resource', sel([...flows.map(f => ['flow:' + f.name, 'Flow: ' + f.displayName]), ...pbs.map(p => ['pb:' + p.name, 'Playbook: ' + p.displayName])], startVal, v => { if (v.startsWith('pb:')) { x.startPlaybook = v.slice(3); delete x.startFlow; } else { x.startFlow = v.slice(5); delete x.startPlaybook; } })),
     field('NLU classification threshold', h('input', { type: 'number', step: '0.05', min: 0, max: 1, value: x.nluSettings.classificationThreshold ?? 0.3, oninput: e => x.nluSettings.classificationThreshold = +e.target.value })),
     h('label', { class: 'inline', style: 'margin-top:10px' }, h('input', { type: 'checkbox', checked: ((x.advancedSettings || {}).loggingSettings || {}).enableInteractionLogging !== false, onchange: e => { x.advancedSettings = x.advancedSettings || {}; x.advancedSettings.loggingSettings = Object.assign({}, x.advancedSettings.loggingSettings, { enableInteractionLogging: e.target.checked }); } }), 'Log conversation history')));
+  // security settings (location level)
+  const secs = await api.list(parentOf(ctx.agent) + '/securitySettings');
+  const secSel = sel([['', '— none —'], ...secs.map(x => [x.name, x.displayName])], x.securitySettings || '', v => { x.securitySettings = v || undefined; });
+  main.append(h('h2', null, 'Security'), h('div', { class: 'card' },
+    h('p', { class: 'muted', style: 'margin-top:0' }, 'Parameters marked Redact (on pages, intents or entity types) are masked in conversation history. Security settings add retention and purge rules.'),
+    field('Security settings', secSel),
+    h('button', { class: 'btn small', style: 'margin-top:8px', onclick: async () => {
+      const dn = h('input', { placeholder: 'e.g. 30-day retention' }); const days = h('input', { type: 'number', min: 0, value: 30 });
+      const purge = h('input', { type: 'checkbox' });
+      const r = await modal('New security settings', h('div', null, field('Display name', dn), field('Retention window (days, 0 = keep)', days), h('label', { class: 'inline', style: 'margin-top:10px' }, purge, 'Do not store conversation history')),
+        [['Create', 'primary', () => guard(() => api.post(parentOf(ctx.agent) + '/securitySettings', { displayName: dn.value || 'Security settings', retentionWindowDays: +days.value || undefined, purgeDataTypes: purge.checked ? ['DIALOGFLOW_HISTORY'] : [], redactionScope: 'REDACT_DISK_STORAGE' }))]]);
+      if (r) { x.securitySettings = r.name; await guard(() => api.patch(ctx.agent, x), 'Security settings attached'); render(); }
+    } }, '+ New security settings')));
   main.append(h('h2', null, 'Import / export'), h('div', { class: 'row' },
     h('button', { class: 'btn', onclick: async () => { const r = await api.get(ctx.agent + ':export'); download(slug(a.displayName) + '.agent.json', JSON.stringify(r.response.agentContent, null, 2)); } }, 'Export agent (JSON)'),
     h('button', { class: 'btn', onclick: async () => { const r = await api.post(ctx.agent + ':export', { dataFormat: 'JSON_PACKAGE' }); downloadBase64(slug(a.displayName) + '.zip', r.response.agentContent, 'application/zip'); } }, 'Export JSON package (.zip)'),

@@ -55,7 +55,9 @@ and every agent can be exported, imported into another project, or restored.
 | **System entities** | `sys.number(-integer)`, `cardinal`, `ordinal`, `number-sequence`, `date` (relative and absolute), `time`, `email`, `url`, `phone-number`, `zip-code`, `percentage`, `unit-currency`, `color`, and open types (`any`, `person`, `given-name`, `last-name`, `geo-city`, `geo-country`, `address`, `location`) |
 | **Webhooks** | Standard `WebhookRequest`/`WebhookResponse` (messages with APPEND/REPLACE, session and form parameters, `targetPage`/`targetFlow`, payloads), flexible webhooks (templated body and JSON-path parameter mapping), headers, basic auth, timeouts, disable switch |
 | **Generative** | Playbooks with goal, nested instructions, examples, referenced tools, playbooks and flows; OpenAPI tools (YAML or JSON schema, path/query/body parameters, API-key auth); client-side function tools (`toolCall` / `toolCallResult`); generators. Uses any OpenAI-compatible endpoint; **without an LLM, playbooks replay their examples deterministically** |
-| **Lifecycle** | Flow versions (snapshot, load, compare), environments that pin versions, continuous tests, test cases (`run`, `batchRun`, `calculateCoverage`), validation, change history, conversation history, export/restore, import of the Conversational Agents JSON-package format |
+| **Lifecycle** | Flow versions (snapshot, load, compare), environments that pin versions, continuous tests, test cases (`run`, `batchRun`, `calculateCoverage`), validation, change history, conversation history, export/restore |
+| **Agent files** | Import Google Conversational Agents exports directly: `.zip` / `.blob` archives (JSON package) or unzipped folders, through the console, `agents:import` / `:restore` (base64 `agentContent`) and the CLI; export as a single JSON bundle or a JSON-package `.zip` (`dataFormat: JSON_PACKAGE`). Built on an in-tree DEFLATE decoder and ZIP reader/writer |
+| **Integrations** | `<cx-messenger>` embeddable chat widget (`/messenger.js`) with Dialogflow-Messenger-style rich content (chips, buttons, info cards, images), environment selection and API-key support; a hosted demo page (`/messenger/demo?agent=…`); an Integrations page in the console with copy-ready snippets |
 | **API** | Generic CRUD for every collection with `pageSize`/`pageToken`, `updateMask`, `filter`; Google-style errors; optional API key; CORS |
 
 ## Runtime semantics (summary)
@@ -95,12 +97,24 @@ cxa serve [--addr 127.0.0.1:8080] [--data data/cxa-state.json | --memory] [--api
 cxa chat AGENT [--say "hi" --say "..."] [--debug]      # REPL: :params :reset :event NAME :debug :quit
 cxa test AGENT                                         # runs test cases, exit code reflects result
 cxa validate AGENT
-cxa convert AGENT --to bundle out.json | --to package out-dir/
+cxa convert AGENT --to bundle out.json | --to package out-dir/ | --to zip out.zip
 ```
 
-`AGENT` is either a single-file bundle (see `examples/`) or an unzipped
-Conversational Agents **JSON package** export directory (`agent.json`,
-`flows/`, `intents/`, `entityTypes/`, …).
+`AGENT` is a single-file bundle (see `examples/`), a Conversational Agents
+export archive (`.zip` / `.blob`), or an unzipped **JSON package** directory
+(`agent.json`, `flows/`, `intents/`, `entityTypes/`, …).
+
+## Embedding the web messenger
+
+```html
+<script src="http://127.0.0.1:8080/messenger.js" defer></script>
+<cx-messenger agent="projects/demo/locations/global/agents/rusty-pizza"
+              chat-title="Rusty Pizza" language-code="en"></cx-messenger>
+```
+
+Optional attributes: `environment`, `welcome-event`, `welcome-text`,
+`api-key`, `api-base`, `primary-color` and `expanded`. The widget emits
+`cx-response-received` events with each `detectIntent` response.
 
 To use an LLM for playbooks and generators, point these variables at any
 OpenAI-compatible endpoint (Ollama, vLLM, LiteLLM, llama.cpp, …):
@@ -140,7 +154,7 @@ Helper endpoints: `GET /v3/systemEntities`, `GET /v3/systemFunctions` and `GET /
 
 | Crate | Purpose |
 |---|---|
-| `cx-core` | JSON value, parser and serializer (order-preserving); RFC 3339 time; UUID v4; resource names |
+| `cx-core` | JSON value, parser and serializer (order-preserving); RFC 3339 time; UUID v4; resource names; base64; DEFLATE + ZIP |
 | `cx-regex` | Backtracking regex VM with bit-state memoisation (linear time), classes, groups, lazy quantifiers, `(?i)` |
 | `cx-nlu` | Tokenizer, stemmer, system and custom entity extraction, intent classifier |
 | `cx-http` | HTTP/1.1 server (keep-alive, chunked) and client |

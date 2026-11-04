@@ -215,3 +215,17 @@ fn zip_agent_import_and_json_package_export() {
     let (s, e) = c.call("POST", "/v3/projects/z/locations/global/agents:import", Some(&obj! {"agentContent" => "UEsDBAo="}));
     assert_eq!(s, 400, "{}", e);
 }
+
+#[test]
+fn messenger_widget_is_served_and_demo_validates_input() {
+    let c = Client::start();
+    let (s, js) = c.call("GET", "/messenger.js", None);
+    assert_eq!(s, 200);
+    assert!(js.as_str().unwrap().contains("customElements.define('cx-messenger'"));
+    let (s, page) = c.call("GET", "/messenger/demo?agent=projects/p/locations/global/agents/a&title=Hi", None);
+    assert_eq!(s, 200);
+    assert!(page.as_str().unwrap().contains(r#"<cx-messenger agent="projects/p/locations/global/agents/a""#));
+    // attribute injection is rejected
+    let (s, _) = c.call("GET", "/messenger/demo?agent=x%22%3E%3Cscript%3E", None);
+    assert_eq!(s, 400);
+}

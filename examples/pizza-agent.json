@@ -129,7 +129,12 @@
       "transitionRoutes": [
         {
           "intent": "Default Welcome Intent",
-          "triggerFulfillment": { "messages": [{ "text": { "text": ["Welcome to Rusty Pizza! You can order a pizza, track an order or ask for our hours."] } }] }
+          "triggerFulfillment": {
+            "messages": [
+              { "text": { "text": ["Welcome to Rusty Pizza! You can order a pizza, track an order or ask for our hours."] } },
+              { "payload": { "richContent": [[{ "type": "chips", "options": [{ "text": "Order a pizza" }, { "text": "Track my order" }, { "text": "Opening hours" }] }]] } }
+            ]
+          }
         },
         { "intent": "order.pizza", "targetFlow": "Order Pizza" },
         { "intent": "order.status", "targetPage": "Order Status" },

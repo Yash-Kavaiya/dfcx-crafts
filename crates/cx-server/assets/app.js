@@ -200,7 +200,7 @@ const SECTIONS = [
   ['Build', [['flows', 'Flows'], ['playbooks', 'Playbooks'], ['tools', 'Tools'], ['intents', 'Intents'], ['entityTypes', 'Entity types'], ['transitionRouteGroups', 'Route groups'], ['webhooks', 'Webhooks'], ['generators', 'Generators']]],
   ['Test & deploy', [['testCases', 'Test cases'], ['environments', 'Environments'], ['validation', 'Validation']]],
   ['Monitor', [['conversations', 'Conversation history'], ['changelogs', 'Change history']]],
-  ['Manage', [['settings', 'Agent settings']]],
+  ['Manage', [['integrations', 'Integrations'], ['settings', 'Agent settings']]],
 ];
 async function agentShell(agent, rest, main) {
   const a = await api.get(agent); S.agentRes = a;
@@ -217,7 +217,7 @@ async function agentShell(agent, rest, main) {
     flows: flowsSection, intents: intentsSection, entityTypes: entitiesSection, webhooks: webhooksSection,
     transitionRouteGroups: groupsSection, generators: generatorsSection, playbooks: playbooksSection, tools: toolsSection,
     testCases: testsSection, environments: envSection, validation: validationSection, conversations: convSection,
-    changelogs: changelogSection, settings: settingsSection,
+    changelogs: changelogSection, settings: settingsSection, integrations: integrationsSection,
   }[section];
   if (!fn) return main.append(h('div', { class: 'empty' }, 'Unknown section'));
   await fn(ctx, rest.slice(1), main);
@@ -760,6 +760,25 @@ async function settingsSection(ctx, rest, main) {
     h('button', { class: 'btn', onclick: async () => { const r = await api.post(ctx.agent + ':export', { dataFormat: 'JSON_PACKAGE' }); downloadBase64(slug(a.displayName) + '.zip', r.response.agentContent, 'application/zip'); } }, 'Export JSON package (.zip)'),
     h('button', { class: 'btn', onclick: async () => { const c = await pickAgentContent(); if (!c) return; if (!confirm('Restore replaces all flows, intents and other resources of this agent. Continue?')) return; await guard(() => api.post(ctx.agent + ':restore', { agentContent: c }), 'Agent restored'); render(); } }, 'Restore from file (.json / .zip)')));
   main.append(h('h2', null, 'Danger zone'), h('button', { class: 'btn danger', onclick: async () => { if (!confirm(`Delete agent "${a.displayName}"? This cannot be undone.`)) return; await guard(() => api.del(ctx.agent), 'Agent deleted'); go(`/${parentOf(ctx.agent)}/agents`); } }, 'Delete agent'));
+}
+async function integrationsSection(ctx, rest, main) {
+  const envs = await ctx.list('environments');
+  let env = '';
+  main.append(header('Integrations', 'Connect this agent to websites and backends'));
+  const snippet = h('pre'); const curl = h('pre');
+  const demo = h('a', { target: '_blank', rel: 'noopener' }, 'Open demo page ↗');
+  const draw = () => {
+    const envAttr = env ? `\n  environment="${idOf(env)}"` : '';
+    snippet.textContent = `<script src="${location.origin}/messenger.js" defer></script>\n<cx-messenger\n  agent="${ctx.agent}"${envAttr}\n  chat-title="${S.agentRes.displayName.replace(/"/g, '')}"\n  language-code="${S.agentRes.defaultLanguageCode || 'en'}">\n</cx-messenger>`;
+    curl.textContent = `curl -X POST ${location.origin}/v3/${env || ctx.agent}/sessions/my-session:detectIntent \\\n  -H 'Content-Type: application/json' \\\n  -d '{"queryInput":{"text":{"text":"hi"},"languageCode":"${S.agentRes.defaultLanguageCode || 'en'}"}}'`;
+    demo.href = `/messenger/demo?agent=${encodeURIComponent(ctx.agent)}&title=${encodeURIComponent(S.agentRes.displayName)}` + (env ? `&environment=${encodeURIComponent(env)}` : '');
+  };
+  const copy = el => h('button', { class: 'btn small', onclick: async () => { try { await navigator.clipboard.writeText(el.textContent); toast('Copied'); } catch (e) { toast('Copy failed — select the text manually', true); } } }, 'Copy');
+  main.append(h('div', { class: 'card' }, h('div', { class: 'row between' }, h('h2', { style: 'margin:0' }, 'Web messenger'), h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Environment'), sel([['', 'Draft'], ...envs.map(e => [e.name, e.displayName])], '', v => { env = v; draw(); }))),
+    h('p', { class: 'muted' }, 'Paste this snippet into any web page to add a chat bubble. It supports text and rich content payloads (chips, buttons, info cards, images).'),
+    snippet, h('div', { class: 'row' }, copy(snippet), demo)));
+  main.append(h('div', { class: 'card' }, h('h2', { style: 'margin-top:0' }, 'REST API'), h('p', { class: 'muted' }, 'Call detectIntent from your backend. Session ids are any string you choose; state is kept per session.'), curl, copy(curl)));
+  draw();
 }
 function slug(s) { return (s || 'agent').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
 

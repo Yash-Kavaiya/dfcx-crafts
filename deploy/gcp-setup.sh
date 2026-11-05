@@ -31,6 +31,19 @@ RUNTIME_SA="${RUNTIME_SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 exists() { "$@" >/dev/null 2>&1; }
+# Retries a command while IAM changes propagate (up to ~1 minute).
+retry() {
+  local n=0
+  until "$@"; do
+    n=$((n + 1))
+    if [ "$n" -ge 6 ]; then
+      echo "Giving up after $n attempts: $*" >&2
+      return 1
+    fi
+    echo "  …not ready yet, retrying in 10s ($n/5)" >&2
+    sleep 10
+  done
+}
 
 gcloud config set project "$PROJECT_ID" >/dev/null
 PROJECT_NUMBER="$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')"
@@ -64,7 +77,7 @@ gcloud iam service-accounts add-iam-policy-binding "$RUNTIME_SA" \
 step "Data bucket gs://${BUCKET} (platform state)"
 exists gcloud storage buckets describe "gs://${BUCKET}" ||
   gcloud storage buckets create "gs://${BUCKET}" --location "$REGION" --uniform-bucket-level-access
-gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
+retry gcloud storage buckets add-iam-policy-binding "gs://${BUCKET}" \
   --member "serviceAccount:${RUNTIME_SA}" --role roles/storage.objectUser >/dev/null
 
 if [ "$CREATE_API_KEY" = "1" ]; then
@@ -80,16 +93,32 @@ if [ "$CREATE_API_KEY" = "1" ]; then
 fi
 
 step "Workload Identity Federation for ${GITHUB_REPO}"
-exists gcloud iam workload-identity-pools describe "$POOL" --location global ||
-  gcloud iam workload-identity-pools create "$POOL" --location global --display-name "GitHub Actions"
-exists gcloud iam workload-identity-pools providers describe "$PROVIDER" --location global --workload-identity-pool "$POOL" ||
-  gcloud iam workload-identity-pools providers create-oidc "$PROVIDER" \
-    --location global --workload-identity-pool "$POOL" \
-    --display-name "GitHub Actions OIDC" \
-    --issuer-uri "https://token.actions.githubusercontent.com" \
-    --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
-    --attribute-condition "assertion.repository == '${GITHUB_REPO}'"
-gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" \
+# Deleted pools/providers stay visible (state DELETED) for 30 days and
+# block re-creation, so restore them instead of assuming they are usable.
+pool_state="$(gcloud iam workload-identity-pools describe "$POOL" --location global --format='value(state)' 2>/dev/null || true)"
+case "$pool_state" in
+  ACTIVE) echo "Pool ${POOL} exists." ;;
+  DELETED)
+    echo "Pool ${POOL} was deleted earlier; restoring it."
+    gcloud iam workload-identity-pools undelete "$POOL" --location global ;;
+  *) gcloud iam workload-identity-pools create "$POOL" --location global --display-name "GitHub Actions" ;;
+esac
+provider_state="$(gcloud iam workload-identity-pools providers describe "$PROVIDER" --location global --workload-identity-pool "$POOL" --format='value(state)' 2>/dev/null || true)"
+case "$provider_state" in
+  ACTIVE) echo "Provider ${PROVIDER} exists." ;;
+  DELETED)
+    echo "Provider ${PROVIDER} was deleted earlier; restoring it."
+    gcloud iam workload-identity-pools providers undelete "$PROVIDER" --location global --workload-identity-pool "$POOL" ;;
+  *)
+    # A just-created pool can take a few seconds to become visible.
+    retry gcloud iam workload-identity-pools providers create-oidc "$PROVIDER" \
+      --location global --workload-identity-pool "$POOL" \
+      --display-name "GitHub Actions OIDC" \
+      --issuer-uri "https://token.actions.githubusercontent.com" \
+      --attribute-mapping "google.subject=assertion.sub,attribute.repository=assertion.repository,attribute.ref=assertion.ref" \
+      --attribute-condition "assertion.repository == '${GITHUB_REPO}'" ;;
+esac
+retry gcloud iam service-accounts add-iam-policy-binding "$DEPLOY_SA" \
   --role roles/iam.workloadIdentityUser \
   --member "principalSet://iam.googleapis.com/projects/${PROJECT_NUMBER}/locations/global/workloadIdentityPools/${POOL}/attribute.repository/${GITHUB_REPO}" >/dev/null
 

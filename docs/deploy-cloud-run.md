@@ -116,3 +116,18 @@ docker build -t cxa .
 docker run -p 8080:8080 -e CXA_SEED=/app/examples/pizza-agent.json cxa
 # open http://localhost:8080/projects
 ```
+
+## Troubleshooting
+
+- **`providers create-oidc … NOT_FOUND`.** The Workload Identity pool was
+  deleted earlier. Deleted pools stay visible for 30 days and block
+  re-creation. The setup script restores deleted pools and providers
+  automatically. With an older copy of the script, run
+  `gcloud iam workload-identity-pools undelete github --location global`, or
+  re-run with another name: `POOL=cxa-github ./deploy/gcp-setup.sh`.
+- **IAM changes are not visible yet.** New service accounts, pools and
+  bindings can take a few seconds to propagate. The script retries those
+  steps. Re-running the whole script is also safe.
+- **Rotating the API key.** Add a new secret version, then redeploy (re-run
+  the workflow):
+  `head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' | gcloud secrets versions add cxa-api-key --data-file=-`

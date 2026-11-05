@@ -67,6 +67,8 @@ push to main ──► test ──► docker build ──► Artifact Registry �
 | `PUBLIC_SESSIONS` | `1` | `1` lets `:detectIntent` / `:matchIntent` run without the API key, so the `<cx-messenger>` widget can chat. The management API always needs the key. |
 | `CXA_SEED` | the three example agents | Comma-separated agent files baked into the image (`/app/examples/...`), created in project `demo` if missing. Set it to a space to seed nothing. |
 | `CXA_LLM_URL`, `CXA_LLM_MODEL` | unset | OpenAI-compatible endpoint for playbooks and generators |
+| `MIN_INSTANCES` | `1` | Warm instances. `1` removes cold starts (lowest latency); `0` scales to zero (no idle cost) |
+| `CPU_ALWAYS_ON` | `0` | `1` deploys with `--no-cpu-throttling` (instance-based billing): background state flushes run immediately rather than during the next request |
 
 ## Using the deployed platform
 
@@ -103,8 +105,12 @@ push to main ──► test ──► docker build ──► Artifact Registry �
   mount (second-generation execution environment), so agents survive
   restarts and redeploys. Without it, data lives only as long as the
   instance.
-- **Scale to zero.** `--min-instances 0` keeps cost near zero when idle. Set
-  it to 1 for faster first responses.
+- **Latency.** Chat turns take well under 1 ms of server time; persistence
+  happens off the request path (debounced to every 300 ms, flushed on
+  SIGTERM). Responses are gzip-compressed, and console assets are
+  content-hashed and cached as immutable. One warm instance (the default)
+  plus `--cpu-boost` removes cold starts. Set `MIN_INSTANCES=0` to trade
+  first-request latency for zero idle cost.
 - **Image.** A multi-stage build: `rust:slim` to compile, then
   `gcr.io/distroless/cc-debian12:nonroot` at runtime. The result is a few MB,
   with no shell, running as uid 65532.

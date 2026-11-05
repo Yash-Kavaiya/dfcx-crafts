@@ -76,6 +76,10 @@ jobs:
           SEED: ${{ vars.CXA_SEED || '/app/examples/pizza-agent.json,/app/examples/help-center-agent.json,/app/examples/travel-playbook-agent.json' }}
           LLM_URL: ${{ vars.CXA_LLM_URL }}
           LLM_MODEL: ${{ vars.CXA_LLM_MODEL }}
+          # One warm instance avoids cold starts (lowest latency); set 0 to
+          # scale to zero and pay nothing while idle.
+          MIN_INSTANCES: ${{ vars.MIN_INSTANCES || '1' }}
+          CPU_ALWAYS_ON: ${{ vars.CPU_ALWAYS_ON || '0' }}
         run: |
           # '^@^' switches gcloud's list delimiter so values may contain commas.
           ENV_VARS="^@^CXA_SEED=${SEED}@CXA_PUBLIC_SESSIONS=${PUBLIC_SESSIONS}"
@@ -89,7 +93,9 @@ jobs:
             --allow-unauthenticated
             # The store is a single JSON document: one writer instance.
             --max-instances 1
-            --min-instances 0
+            --min-instances "$MIN_INSTANCES"
+            # Extra CPU while the container starts: faster cold starts.
+            --cpu-boost
             --cpu 1
             --memory 512Mi
             --concurrency 80
@@ -99,6 +105,9 @@ jobs:
             --quiet
           )
           [ -n "$RUNTIME_SA" ] && ARGS+=(--service-account "$RUNTIME_SA")
+          # Instance-based billing keeps CPU between requests (background state
+          # flushes run immediately); request-based billing is the default.
+          if [ "$CPU_ALWAYS_ON" = "1" ]; then ARGS+=(--no-cpu-throttling); else ARGS+=(--cpu-throttling); fi
           if [ -n "$BUCKET" ]; then
             # Persist /data (the platform state) in a Cloud Storage bucket.
             ARGS+=(--add-volume "name=data,type=cloud-storage,bucket=${BUCKET}"
@@ -141,4 +150,9 @@ jobs:
             -H 'Content-Type: application/json' \
             -d '{"queryInput":{"text":{"text":"hi"},"languageCode":"en"}}')
           echo "$REPLY" | grep -q "Rusty Pizza" || { echo "unexpected reply: $REPLY"; exit 1; }
+          # Warm latency of a chat turn, as seen from the GitHub runner.
+          for i in 1 2 3 4 5; do
+            curl -s -o /dev/null -w '%{time_total}\n' -X POST "$URL/v3/projects/demo/locations/global/agents/rusty-pizza/sessions/ci-latency:detectIntent" \
+              -H 'Content-Type: application/json' -d '{"queryInput":{"text":{"text":"when are you open"}}}'
+          done | sort -n | awk '{a[NR]=$1} END {printf "detectIntent end-to-end from runner: median %.0f ms\n", a[int((NR+1)/2)]*1000}' | tee -a "$GITHUB_STEP_SUMMARY"
           echo "Smoke test passed: $URL"

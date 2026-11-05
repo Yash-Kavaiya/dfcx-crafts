@@ -19,6 +19,9 @@ dependencies = [
 [[package]]
 name = "cx-http"
 version = "0.1.0"
+dependencies = [
+ "cx-core",
+]
 
 [[package]]
 name = "cx-nlu"

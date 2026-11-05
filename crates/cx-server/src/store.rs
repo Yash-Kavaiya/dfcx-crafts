@@ -7,10 +7,12 @@
 //! stripped from API responses.
 
 use cx_core::name::{collection_of, id_of, parent_of};
-use cx_core::{obj, Map, Value};
+use cx_core::{obj, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 #[derive(Default)]
 pub struct Data {
@@ -27,6 +29,10 @@ pub struct Data {
 pub struct Store {
     pub data: Mutex<Data>,
     path: Option<PathBuf>,
+    /// Set by mutations; the background flusher writes the file when set.
+    dirty: AtomicBool,
+    /// Serialises file writes (flusher thread vs. shutdown flush).
+    write_lock: Mutex<()>,
 }
 
 /// Child collections allowed under each collection.
@@ -91,33 +97,124 @@ impl Store {
                 }
             }
         }
-        Ok(Store { data: Mutex::new(data), path })
+        Ok(Store { data: Mutex::new(data), path, dirty: AtomicBool::new(false), write_lock: Mutex::new(()) })
     }
 
     pub fn in_memory() -> Store {
-        Store { data: Mutex::new(Data::default()), path: None }
+        Store { data: Mutex::new(Data::default()), path: None, dirty: AtomicBool::new(false), write_lock: Mutex::new(()) }
     }
 
-    /// Persists the store (atomic write via rename).
-    pub fn persist(&self, d: &Data) {
-        let Some(p) = &self.path else { return };
-        let mut res = Map::new();
-        let mut seq = Map::new();
-        for (k, v) in &d.resources {
-            res.insert(k.clone(), v.clone());
-            seq.insert(k.clone(), Value::from(*d.seq.get(k).unwrap_or(&0)));
-        }
-        let sessions: Map = d.sessions.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-        let transcripts: Map = d.transcripts.iter().map(|(k, v)| (k.clone(), Value::Array(v.clone()))).collect();
-        let doc = obj! {"version" => 1, "resources" => res, "seq" => seq, "sessions" => sessions, "transcripts" => transcripts};
-        if let Some(dir) = p.parent() {
-            let _ = std::fs::create_dir_all(dir);
-        }
-        let tmp = p.with_extension("json.tmp");
-        if std::fs::write(&tmp, doc.to_string()).is_ok() {
-            let _ = std::fs::rename(&tmp, p);
+    /// Records that the store changed. Writing happens off the request
+    /// path: the background flusher (see [`Store::start_flusher`]) writes
+    /// the file at most every flush interval, and [`Store::flush`] runs on
+    /// shutdown. Requests therefore never wait on disk or Cloud Storage.
+    pub fn persist(&self, _d: &Data) {
+        if self.path.is_some() {
+            self.dirty.store(true, Ordering::SeqCst);
         }
     }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty.load(Ordering::SeqCst)
+    }
+
+    /// Writes the state file now if anything changed (atomic via rename).
+    pub fn flush(&self) -> std::io::Result<()> {
+        let Some(p) = &self.path else { return Ok(()) };
+        let _w = self.write_lock.lock().unwrap();
+        if !self.dirty.swap(false, Ordering::SeqCst) {
+            return Ok(());
+        }
+        // Serialise under the data lock (no deep clone), write outside it.
+        let text = {
+            let d = self.data.lock().unwrap();
+            serialize(&d)
+        };
+        let result = (|| {
+            if let Some(dir) = p.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let tmp = p.with_extension("json.tmp");
+            std::fs::write(&tmp, text)?;
+            std::fs::rename(&tmp, p)
+        })();
+        if result.is_err() {
+            self.dirty.store(true, Ordering::SeqCst); // retry on the next tick
+        }
+        result
+    }
+
+    /// Starts the background writer thread.
+    pub fn start_flusher(self: &Arc<Self>, interval: Duration) {
+        if self.path.is_none() {
+            return;
+        }
+        let store = Arc::clone(self);
+        std::thread::Builder::new()
+            .name("store-flush".into())
+            .spawn(move || loop {
+                std::thread::sleep(interval);
+                if store.is_dirty() {
+                    if let Err(e) = store.flush() {
+                        eprintln!("store: write failed: {}", e);
+                    }
+                }
+            })
+            .expect("spawn flusher");
+    }
+}
+
+fn push_json_str(out: &mut String, s: &str) {
+    out.push_str(&Value::String(s.to_string()).to_string());
+}
+
+/// Streams the whole state as JSON without cloning resources.
+pub fn serialize(d: &Data) -> String {
+    let mut out = String::with_capacity(64 * 1024);
+    out.push_str("{\"version\":1,\"resources\":{");
+    for (i, (k, v)) in d.resources.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_json_str(&mut out, k);
+        out.push(':');
+        out.push_str(&v.to_string());
+    }
+    out.push_str("},\"seq\":{");
+    for (i, (k, _)) in d.resources.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_json_str(&mut out, k);
+        out.push(':');
+        out.push_str(&d.seq.get(k).copied().unwrap_or(0).to_string());
+    }
+    out.push_str("},\"sessions\":{");
+    for (i, (k, v)) in d.sessions.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_json_str(&mut out, k);
+        out.push(':');
+        out.push_str(&v.to_string());
+    }
+    out.push_str("},\"transcripts\":{");
+    for (i, (k, t)) in d.transcripts.iter().enumerate() {
+        if i > 0 {
+            out.push(',');
+        }
+        push_json_str(&mut out, k);
+        out.push_str(":[");
+        for (j, e) in t.iter().enumerate() {
+            if j > 0 {
+                out.push(',');
+            }
+            out.push_str(&e.to_string());
+        }
+        out.push(']');
+    }
+    out.push_str("}}");
+    out
 }
 
 impl Data {
@@ -325,6 +422,30 @@ pub fn describe(name: &str) -> (String, String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn debounced_persistence_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("cxa-store-{}", cx_core::uuid::new_v4()));
+        let path = dir.join("state.json");
+        let store = Store::open(Some(path.clone())).unwrap();
+        {
+            let mut d = store.data.lock().unwrap();
+            d.put("projects/p", obj! {"name" => "projects/p", "displayName" => "P \"quoted\""});
+            d.sessions.insert("projects/p/x/sessions/s".into(), obj! {"turn" => 3});
+            d.transcripts.insert("projects/p/x/sessions/s".into(), vec![obj! {"t" => 1}]);
+            store.persist(&d);
+        }
+        assert!(!path.exists(), "nothing is written on the request path");
+        store.flush().unwrap();
+        assert!(!store.is_dirty());
+        let back = Store::open(Some(path.clone())).unwrap();
+        let d = back.data.lock().unwrap();
+        assert_eq!(d.get("projects/p").unwrap().str("displayName"), "P \"quoted\"");
+        assert_eq!(d.sessions.len(), 1);
+        assert_eq!(d.transcripts.values().next().unwrap().len(), 1);
+        drop(d);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn crud_and_listing() {
         let mut d = Data::default();

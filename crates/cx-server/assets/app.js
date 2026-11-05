@@ -3,6 +3,71 @@
 
 // ---------- helpers ----------
 const $ = (s, r = document) => r.querySelector(s);
+// ---------- icons (inline SVG, stroke style, themed via currentColor) ----------
+const ICONS = {
+  menu: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
+  chevron: '<path d="m9 6 6 6-6 6"/>',
+  flow: '<rect x="3" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="16" width="7" height="5" rx="1.5"/><path d="M6.5 8v3.5A2.5 2.5 0 0 0 9 14h6.5a2 2 0 0 1 2 2"/>',
+  sparkles: '<path d="m12 3 1.8 4.7 4.7 1.8-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="m19 14 .8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/>',
+  tool: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
+  database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+  intent: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 9h8M8 13h5"/>',
+  tag: '<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  route: '<circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H15a3 3 0 0 1 0 6H9a3 3 0 0 0 0 6h6.5"/>',
+  webhook: '<path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/>',
+  wand: '<path d="m3 21 12-12"/><path d="M15 4V2M15 12v-2M11 6H9M21 6h-2M18.5 3.5 17 5M18.5 8.5 17 7"/>',
+  flask: '<path d="M9 3h6M10 3v6l-5.5 9.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7.5 15h9"/>',
+  layers: '<path d="m12 2 10 5-10 5L2 7z"/><path d="m2 17 10 5 10-5"/><path d="m2 12 10 5 10-5"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>',
+  chart: '<path d="M3 3v18h18"/><path d="M8 16v-5M13 16V8M18 16v-9"/>',
+  chats: '<path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z"/><path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1"/>',
+  history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
+  plug: '<path d="M12 22v-5M9 8V2M15 8V2"/><path d="M18 8v4a6 6 0 0 1-12 0V8z"/>',
+  sliders: '<path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/>',
+  folder: '<path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2z"/>',
+  bot: '<rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4"/><circle cx="12" cy="3" r="1"/><path d="M9 13v1M15 13v1M9.5 17h5"/>',
+  trash: '<path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+  play: '<path d="M7 4v16l13-8z"/>',
+  send: '<path d="M22 2 11 13"/><path d="m22 2-7 20-4-9-9-4z"/>',
+  upload: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+  moon: '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+  monitor: '<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>',
+  key: '<circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-9.6 9.6M15.5 7.5l3 3L22 7l-3-3"/>',
+  logout: '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
+  external: '<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-2.6-6.4L21 8"/><path d="M21 3v5h-5"/>',
+  check: '<path d="M20 6 9 17l-5-5"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+  info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+  file: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>',
+  code: '<path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/>',
+  bolt: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+  globe: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20"/>',
+  edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+};
+function icon(name, size = 18, cls = '') {
+  const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  s.setAttribute('viewBox', '0 0 24 24'); s.setAttribute('width', size); s.setAttribute('height', size);
+  s.setAttribute('fill', 'none'); s.setAttribute('stroke', 'currentColor'); s.setAttribute('stroke-width', '1.8');
+  s.setAttribute('stroke-linecap', 'round'); s.setAttribute('stroke-linejoin', 'round'); s.setAttribute('aria-hidden', 'true');
+  s.setAttribute('class', 'ic ' + cls); s.innerHTML = ICONS[name] || ICONS.info;
+  return s;
+}
+// Buttons get a matching icon automatically from their label.
+const BUTTON_ICONS = {
+  'Delete': 'trash', 'Save': 'check', 'Save JSON': 'check', 'Save page': 'check', 'Save intent': 'check', 'Run': 'play', 'Run all': 'play',
+  'Run tests': 'play', 'Train': 'bolt', 'Import agent': 'upload', 'Export agent (JSON)': 'download', 'Export JSON package (.zip)': 'download',
+  'Restore from file (.json / .zip)': 'upload', 'Search': 'search', 'Send': 'send', 'Reset': 'refresh', 'Event': 'bolt', 'Save as test': 'flask',
+  'Coverage': 'chart', 'Copy': 'copy', 'Re-validate': 'refresh', 'Delete project': 'trash', 'Delete agent': 'trash', 'Import CSV': 'upload',
+  'Load to draft': 'download', 'Sign in': 'key', 'Create': 'plus', 'Add': 'plus',
+};
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   if (attrs) for (const [k, v] of Object.entries(attrs)) {
@@ -14,7 +79,15 @@ function h(tag, attrs, ...kids) {
     else if (k === 'html') el.innerHTML = v;
     else el.setAttribute(k, v === true ? '' : v);
   }
-  for (const k of kids.flat(Infinity)) if (k != null && k !== false) el.append(k.nodeType ? k : document.createTextNode(String(k)));
+  const flat = kids.flat(Infinity).filter(k => k != null && k !== false);
+  if (tag === 'button' && flat.length === 1 && typeof flat[0] === 'string') {
+    const label = flat[0];
+    if (label.startsWith('+ ')) { flat[0] = label.slice(2); flat.unshift(icon('plus', 16)); }
+    else if (BUTTON_ICONS[label]) flat.unshift(icon(BUTTON_ICONS[label], 16));
+  }
+  for (const k of flat) el.append(k.nodeType ? k : document.createTextNode(String(k)));
+  // Tables scroll horizontally inside their own container on small screens.
+  if (tag === 'table') return h('div', { class: 'table-wrap' }, el);
   return el;
 }
 const idOf = n => (n || '').split('/').pop();
@@ -22,7 +95,8 @@ const parentOf = n => n.split('/').slice(0, -2).join('/');
 const clone = v => JSON.parse(JSON.stringify(v ?? null));
 const esc = s => String(s ?? '');
 function toast(msg, err) {
-  const t = $('#toast'); t.textContent = msg; t.className = 'toast' + (err ? ' err' : '');
+  const t = $('#toast'); t.innerHTML = ''; t.append(icon(err ? 'alert' : 'check', 18), h('span', null, msg));
+  t.className = 'toast' + (err ? ' err' : '');
   clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.add('hidden'), err ? 6000 : 2500);
 }
 // API key handling: servers started with --api-key / CXA_API_KEY answer 401
@@ -38,7 +112,13 @@ function askForKey(message) {
     [['Sign in', 'primary', () => input.value.trim() || toast('Enter the API key', true) && false]]).then(v => { keyPrompt = null; if (v) setKey(input.value.trim()); return !!v; });
   return keyPrompt;
 }
+let inflight = 0;
+function busy(delta) { inflight = Math.max(0, inflight + delta); document.body.classList.toggle('loading', inflight > 0); }
 async function call(method, path, body, query, attempt = 0) {
+  busy(1);
+  try { return await call1(method, path, body, query, attempt); } finally { busy(-1); }
+}
+async function call1(method, path, body, query, attempt) {
   const qs = query ? '?' + new URLSearchParams(query) : '';
   const headers = { 'Content-Type': 'application/json' };
   const key = getKey(); if (key) headers.Authorization = 'Bearer ' + key;
@@ -136,45 +216,81 @@ function go(path) { location.hash = '#' + path; }
 function routeParts() { return (location.hash.slice(1) || '/projects').split('/').filter(Boolean); }
 
 window.addEventListener('hashchange', render);
+// theme: auto (follows the OS) -> light -> dark
+const THEMES = ['auto', 'light', 'dark'];
+function currentTheme() { try { return localStorage.getItem('cxa-theme') || 'auto'; } catch (e) { return 'auto'; } }
+function applyTheme(t) {
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('cxa-theme', t); } catch (e) { }
+  const b = $('#theme-toggle'); b.innerHTML = ''; b.append(icon(t === 'dark' ? 'moon' : t === 'light' ? 'sun' : 'monitor', 20));
+  b.title = 'Theme: ' + t + ' (click to change)';
+}
+function setNav(open) {
+  document.body.classList.toggle('nav-open', open);
+  $('#nav-toggle').setAttribute('aria-expanded', String(open));
+}
 window.addEventListener('load', () => {
   if (!location.hash && location.pathname !== '/' && location.pathname.startsWith('/projects')) location.hash = '#' + location.pathname;
+  $('#nav-toggle').append(icon('menu', 22));
+  $('#nav-toggle').onclick = () => setNav(!document.body.classList.contains('nav-open'));
+  $('#scrim').onclick = () => { setNav(false); if (innerWidth <= 900 && S.sim.open) { S.sim.open = false; renderSim(); } };
+  $('#toggle-sim').append(icon('chats', 18), h('span', { class: 'lbl' }, 'Test agent'));
   $('#toggle-sim').onclick = () => { S.sim.open = !S.sim.open; renderSim(); };
+  applyTheme(currentTheme());
+  $('#theme-toggle').onclick = () => applyTheme(THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length]);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { setNav(false); const m = $('#modal-root .modal-back'); if (m) m.click(); } });
   fetch('/v3/serverInfo').then(r => r.json()).then(info => {
     S.serverInfo = info;
-    if (info.apiKeyRequired) $('.topbar').append(h('button', { class: 'btn ghost small', title: 'Forget the API key stored in this browser', onclick: () => { setKey(''); toast('Signed out'); render(); } }, 'Sign out'));
+    if (info.apiKeyRequired) $('#top-actions').prepend(h('button', { class: 'iconbtn', title: 'Sign out (forget the API key stored in this browser)', 'aria-label': 'Sign out', onclick: () => { setKey(''); toast('Signed out'); render(); } }, icon('logout', 20)));
   }).catch(() => { });
   render();
 });
 
 function crumbs(items) {
   const c = $('#crumbs'); c.innerHTML = '';
-  items.forEach(([label, href], i) => { if (i) c.append(h('span', { class: 'sep' }, '›')); c.append(href ? h('a', { href: '#' + href }, label) : h('span', null, label)); });
+  items.forEach(([label, href], i) => {
+    if (i) c.append(h('span', { class: 'sep' }, icon('chevron', 14)));
+    c.append(href ? h('a', { href: '#' + href }, label) : h('span', { class: i === items.length - 1 ? 'current' : '' }, label));
+  });
 }
 
 async function render() {
   const p = routeParts();
   const main = $('#main'); main.innerHTML = ''; $('#sidenav').innerHTML = '';
+  setNav(false); main.scrollTop = 0;
   try {
     if (p[0] !== 'projects') return go('/projects');
-    if (p.length === 1) return await projectsPage(main);
-    if (p.length === 2) return go(`/projects/${p[1]}/locations/global/agents`);
-    if (p.length <= 5) return await agentsPage(main, p[1], p[3] || 'global');
-    const agent = p.slice(0, 6).join('/');
-    S.agent = agent;
-    await agentShell(agent, p.slice(6), main);
-  } catch (e) { main.append(h('div', { class: 'empty' }, 'Error: ' + e.message)); }
-  renderSim();
+    if (p.length === 1) { S.agent = null; await projectsPage(main); }
+    else if (p.length === 2) return go(`/projects/${p[1]}/locations/global/agents`);
+    else if (p.length <= 5) { S.agent = null; await agentsPage(main, p[1], p[3] || 'global'); }
+    else {
+      const agent = p.slice(0, 6).join('/');
+      S.agent = agent;
+      await agentShell(agent, p.slice(6), main);
+    }
+  } catch (e) { main.append(emptyState('alert', 'Something went wrong', e.message)); }
+  finally {
+    document.body.classList.toggle('has-nav', !!$('#sidenav').firstChild);
+    renderSim();
+  }
 }
 
 // ---------- projects & agents ----------
+function emptyState(ic, title, text, action) {
+  return h('div', { class: 'empty' }, h('div', { class: 'empty-ic' }, icon(ic, 28)), h('div', { class: 'empty-t' }, title), text ? h('div', { class: 'muted' }, text) : null, action || null);
+}
+function avatar(name, ic) {
+  const hue = [...(name || '?')].reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+  return h('span', { class: 'avatar', style: `--hue:${hue}` }, ic ? icon(ic, 20) : (name || '?').trim().charAt(0).toUpperCase());
+}
 async function projectsPage(main) {
   crumbs([['Projects']]); S.agent = null;
   const projects = await api.list('projects');
-  main.append(h('div', { class: 'row between' }, h('h1', null, 'Projects'),
-    h('button', { class: 'btn primary', onclick: newProject }, '+ New project')));
-  if (!projects.length) main.append(h('div', { class: 'empty' }, 'No projects yet. Create one to start building agents.'));
-  main.append(h('div', { class: 'grid' }, projects.map(pr => h('div', { class: 'tile', onclick: () => go(`/${pr.name}/locations/global/agents`) },
-    h('div', { class: 't' }, pr.displayName), h('div', { class: 's' }, 'ID: ' + idOf(pr.name)), h('div', { class: 's' }, 'Created ' + (pr.createTime || '').slice(0, 10))))));
+  main.append(pageHead('folder', 'Projects', 'Each project holds agents across locations.', h('button', { class: 'btn primary', onclick: newProject }, '+ New project')));
+  if (!projects.length) return main.append(emptyState('folder', 'No projects yet', 'Create a project to start building agents.', h('button', { class: 'btn primary', onclick: newProject }, '+ New project')));
+  main.append(h('div', { class: 'grid' }, projects.map(pr => h('a', { class: 'tile', href: `#/${pr.name}/locations/global/agents` },
+    h('div', { class: 'tile-top' }, avatar(pr.displayName), h('div', { class: 'tile-main' }, h('div', { class: 't' }, pr.displayName), h('div', { class: 's' }, idOf(pr.name))), icon('chevron', 18, 'tile-go')),
+    h('div', { class: 'tile-meta' }, icon('history', 14), 'Created ' + ((pr.createTime || '').slice(0, 10) || '—'))))));
 }
 async function newProject() {
   const dn = h('input', { placeholder: 'My Project' }); const id = h('input', { placeholder: 'my-project (optional)' });
@@ -188,17 +304,15 @@ async function agentsPage(main, project, loc) {
   crumbs([['Projects', '/projects'], [proj.displayName], ['Agents']]); S.agent = null;
   const parent = `projects/${project}/locations/${loc}`;
   const agents = await api.list(parent + '/agents');
-  const locSel = h('select', { class: 'inline', onchange: e => go(`/projects/${project}/locations/${e.target.value}/agents`) }, LOCATIONS.map(l => h('option', { value: l, selected: l === loc }, l)));
-  main.append(h('div', { class: 'row between' }, h('h1', null, 'Agents'),
-    h('div', { class: 'row' }, h('span', { class: 'muted' }, 'Location'), locSel,
-      h('button', { class: 'btn', title: 'Import a .json bundle or a Google Conversational Agents export (.zip / .blob)', onclick: () => importAgent(parent) }, 'Import agent'),
-      h('button', { class: 'btn primary', onclick: () => newAgent(parent) }, '+ Create agent'),
-      h('button', { class: 'btn danger', onclick: async () => { if (confirm(`Delete project ${proj.displayName} and all its agents?`)) { await guard(() => api.del(`projects/${project}`), 'Project deleted'); go('/projects'); } } }, 'Delete project'))));
-  if (!agents.length) main.append(h('div', { class: 'empty' }, `No agents in ${loc}. Create one or import an exported agent.`));
-  main.append(h('div', { class: 'grid' }, agents.map(a => h('div', { class: 'tile', onclick: () => go('/' + a.name + '/flows') },
-    h('div', { class: 't' }, a.displayName),
-    h('div', { class: 's' }, (a.description || '').slice(0, 120)),
-    h('div', { class: 's' }, `${a.defaultLanguageCode} · ${a.timeZone} · ${a.startPlaybook ? 'playbook start' : 'flow start'}`)))));
+  const locSel = h('select', { class: 'inline', 'aria-label': 'Location', onchange: e => go(`/projects/${project}/locations/${e.target.value}/agents`) }, LOCATIONS.map(l => h('option', { value: l, selected: l === loc }, l)));
+  main.append(pageHead('bot', 'Agents', h('span', { class: 'row tight' }, icon('globe', 14), 'Location', locSel),
+    h('button', { class: 'btn', title: 'Import a .json bundle or a Google Conversational Agents export (.zip / .blob)', onclick: () => importAgent(parent) }, 'Import agent'),
+    h('button', { class: 'btn primary', onclick: () => newAgent(parent) }, '+ Create agent'),
+    h('button', { class: 'btn danger ghost', onclick: async () => { if (confirm(`Delete project ${proj.displayName} and all its agents?`)) { await guard(() => api.del(`projects/${project}`), 'Project deleted'); go('/projects'); } } }, 'Delete project')));
+  if (!agents.length) return main.append(emptyState('bot', `No agents in ${loc}`, 'Create an agent, or import a .json bundle or a Google agent export (.zip).', h('button', { class: 'btn primary', onclick: () => newAgent(parent) }, '+ Create agent')));
+  main.append(h('div', { class: 'grid' }, agents.map(a => h('a', { class: 'tile', href: '#/' + a.name + '/flows' },
+    h('div', { class: 'tile-top' }, avatar(a.displayName, a.startPlaybook ? 'sparkles' : 'bot'), h('div', { class: 'tile-main' }, h('div', { class: 't' }, a.displayName), h('div', { class: 's' }, (a.description || 'No description').slice(0, 110))), icon('chevron', 18, 'tile-go')),
+    h('div', { class: 'tile-meta' }, h('span', { class: 'chip' }, a.defaultLanguageCode), h('span', { class: 'chip' }, a.timeZone), h('span', { class: 'chip ' + (a.startPlaybook ? 'violet' : 'blue') }, a.startPlaybook ? 'Generative' : 'Flow-based'))))));
 }
 async function newAgent(parent) {
   const dn = h('input', { placeholder: 'My agent' }); const lang = h('input', { value: 'en' }); const tz = h('input', { value: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' });
@@ -221,20 +335,24 @@ async function importAgent(parent) {
 
 // ---------- agent shell ----------
 const SECTIONS = [
-  ['Build', [['flows', 'Flows'], ['playbooks', 'Playbooks'], ['tools', 'Tools'], ['dataStores', 'Data stores'], ['intents', 'Intents'], ['entityTypes', 'Entity types'], ['transitionRouteGroups', 'Route groups'], ['webhooks', 'Webhooks'], ['generators', 'Generators']]],
-  ['Test & deploy', [['testCases', 'Test cases'], ['environments', 'Environments'], ['validation', 'Validation']]],
-  ['Monitor', [['analytics', 'Analytics'], ['conversations', 'Conversation history'], ['changelogs', 'Change history']]],
-  ['Manage', [['integrations', 'Integrations'], ['settings', 'Agent settings']]],
+  ['Build', [['flows', 'Flows', 'flow'], ['playbooks', 'Playbooks', 'sparkles'], ['tools', 'Tools', 'tool'], ['dataStores', 'Data stores', 'database'], ['intents', 'Intents', 'intent'], ['entityTypes', 'Entity types', 'tag'], ['transitionRouteGroups', 'Route groups', 'route'], ['webhooks', 'Webhooks', 'webhook'], ['generators', 'Generators', 'wand']]],
+  ['Test & deploy', [['testCases', 'Test cases', 'flask'], ['environments', 'Environments', 'layers'], ['validation', 'Validation', 'shield']]],
+  ['Monitor', [['analytics', 'Analytics', 'chart'], ['conversations', 'Conversation history', 'chats'], ['changelogs', 'Change history', 'history']]],
+  ['Manage', [['integrations', 'Integrations', 'plug'], ['settings', 'Agent settings', 'sliders']]],
 ];
 async function agentShell(agent, rest, main) {
   const a = await api.get(agent); S.agentRes = a;
   const project = agent.split('/')[1];
   const section = rest[0] || 'flows';
-  crumbs([['Projects', '/projects'], [project, `/projects/${project}/locations/${agent.split('/')[3]}/agents`], [a.displayName, `/${agent}/flows`], [SECTIONS.flatMap(s => s[1]).find(x => x[0] === section)?.[1] || section]]);
+  const sec = SECTIONS.flatMap(s => s[1]).find(x => x[0] === section);
+  S.sectionIcon = sec ? sec[2] : 'file';
+  crumbs([['Projects', '/projects'], [project, `/projects/${project}/locations/${agent.split('/')[3]}/agents`], [a.displayName, `/${agent}/flows`], [sec ? sec[1] : section]]);
   const nav = $('#sidenav');
+  nav.append(h('a', { class: 'agent-card', href: `#/projects/${project}/locations/${agent.split('/')[3]}/agents`, title: 'All agents' },
+    avatar(a.displayName, a.startPlaybook ? 'sparkles' : 'bot'), h('span', { class: 'agent-card-t' }, h('b', null, a.displayName), h('small', null, `${project} · ${agent.split('/')[3]}`))));
   for (const [group, items] of SECTIONS) {
     nav.append(h('div', { class: 'group' }, group));
-    for (const [k, label] of items) nav.append(h('a', { href: `#/${agent}/${k}`, class: k === section ? 'active' : '' }, h('span', { class: 'lbl' }, label)));
+    for (const [k, label, ic] of items) nav.append(h('a', { href: `#/${agent}/${k}`, class: k === section ? 'active' : '', 'aria-current': k === section ? 'page' : null }, icon(ic, 18), h('span', { class: 'lbl' }, label)));
   }
   const ctx = new Ctx(agent);
   const fn = {
@@ -251,11 +369,16 @@ class Ctx {
   async list(coll, parent) { const p = (parent || this.agent) + '/' + coll; if (!this.c[p]) this.c[p] = await api.list(p); return this.c[p]; }
   async pagesOf(flow) { return this.list('pages', flow); }
 }
+function pageHead(ic, title, sub, ...buttons) {
+  return h('div', { class: 'page-head' },
+    h('div', { class: 'page-title' }, h('span', { class: 'page-ic' }, icon(ic, 22)), h('div', null, h('h1', null, title), sub ? h('div', { class: 'muted sub' }, sub) : null)),
+    h('div', { class: 'row actions' }, buttons));
+}
 function listPage(main, title, items, cols, onOpen, onNew, extra) {
-  main.append(h('div', { class: 'row between' }, h('h1', null, title), h('div', { class: 'row' }, extra || null, onNew ? h('button', { class: 'btn primary', onclick: onNew }, '+ Create') : null)));
-  if (!items.length) return main.append(h('div', { class: 'empty' }, `No ${title.toLowerCase()} yet.`));
-  main.append(h('table', null, h('tr', null, cols.map(c => h('th', null, c[0]))),
-    items.map(it => h('tr', { class: 'click', onclick: () => onOpen(it) }, cols.map(c => h('td', null, c[1](it)))))));
+  main.append(pageHead(S.sectionIcon || 'file', title, items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : null, extra || null, onNew ? h('button', { class: 'btn primary', onclick: onNew }, '+ Create') : null));
+  if (!items.length) return main.append(emptyState(S.sectionIcon || 'file', `No ${title.toLowerCase()} yet`, onNew ? 'Create the first one to get started.' : null, onNew ? h('button', { class: 'btn primary', onclick: onNew }, '+ Create') : null));
+  main.append(h('table', { class: 'list' }, h('thead', null, h('tr', null, cols.map(c => h('th', null, c[0])), h('th', { class: 'go' }))),
+    h('tbody', null, items.map(it => h('tr', { class: 'click', tabindex: '0', onclick: () => onOpen(it), onkeydown: e => { if (e.key === 'Enter') onOpen(it); } }, cols.map(c => h('td', { 'data-label': c[0] }, c[1](it))), h('td', { class: 'go' }, icon('chevron', 16)))))));
 }
 async function createNamed(collPath, title, extraFields, build) {
   const dn = h('input', { placeholder: 'Display name' });
@@ -266,10 +389,10 @@ async function createNamed(collPath, title, extraFields, build) {
   return r;
 }
 function deleteBtn(name, after) {
-  return h('button', { class: 'btn danger', onclick: async () => { if (!confirm('Delete this resource?')) return; await guard(() => api.del(name), 'Deleted'); go(after); } }, 'Delete');
+  return h('button', { class: 'btn danger ghost', onclick: async () => { if (!confirm('Delete this resource?')) return; await guard(() => api.del(name), 'Deleted'); go(after); } }, 'Delete');
 }
 function header(title, sub, ...buttons) {
-  return h('div', { class: 'row between' }, h('div', null, h('h1', { style: 'margin-bottom:2px' }, title), sub ? h('div', { class: 'muted', style: 'margin-bottom:12px' }, sub) : null), h('div', { class: 'row' }, buttons));
+  return pageHead(S.sectionIcon || 'file', title, sub, ...buttons);
 }
 
 // ---------- shared editors ----------
@@ -963,6 +1086,7 @@ function metaLine(qr) {
 async function renderSim() {
   const sim = $('#sim');
   sim.classList.toggle('hidden', !S.sim.open || !S.agent);
+  document.body.classList.toggle('sim-open', !!(S.sim.open && S.agent));
   $('#toggle-sim').classList.toggle('hidden', !S.agent);
   if (!S.sim.open || !S.agent) return;
   if (S.sim.agent !== S.agent) { S.sim.agent = S.agent; S.sim.session = null; S.sim.log = []; S.sim.state = null; }
@@ -971,49 +1095,64 @@ async function renderSim() {
   let envs = [];
   try { envs = await api.list(S.agent + '/environments'); } catch (e) { }
   const envSel = sel([['', 'Draft'], ...envs.map(e => [e.name, e.displayName])], S.sim.env, v => { S.sim.env = v; resetSim(); });
-  const log = h('div', { class: 'sim-log' });
+  const log = h('div', { class: 'sim-log', 'aria-live': 'polite' });
+  const botRow = (...content) => h('div', { class: 'msg-row bot' }, h('span', { class: 'bot-av' }, icon(S.agentRes && S.agentRes.startPlaybook ? 'sparkles' : 'bot', 16)), h('div', { class: 'msg-stack' }, content));
   const drawLog = () => {
     log.innerHTML = '';
-    if (!S.sim.log.length) log.append(h('div', { class: 'bubble sys' }, 'Say something to start a conversation.'));
+    if (!S.sim.log.length) log.append(h('div', { class: 'sim-empty' }, h('div', { class: 'empty-ic' }, icon('chats', 26)), h('b', null, 'Try your agent'), h('div', { class: 'muted' }, 'Type a message below. Every turn shows the matched intent, page and round-trip time.')));
     for (const e of S.sim.log) {
-      if (e.user != null) log.append(h('div', { class: 'bubble user' }, e.user));
+      if (e.user != null) log.append(h('div', { class: 'msg-row user' }, h('div', { class: 'bubble user' }, e.user)));
+      if (e.pending) log.append(botRow(h('div', { class: 'bubble bot typing' }, h('i'), h('i'), h('i'))));
       if (e.resp) {
-        const qr = e.resp.queryResult;
+        const qr = e.resp.queryResult; const parts = [];
         for (const m of qr.responseMessages || []) {
-          if (m.text) log.append(h('div', { class: 'bubble bot' }, m.text.text.join(' ')));
-          else if (m.payload) log.append(h('div', { class: 'bubble bot' }, h('code', null, JSON.stringify(m.payload))));
-          else if (m.toolCall) log.append(h('div', { class: 'bubble sys' }, '⚙ client tool call: ' + idOf(m.toolCall.tool) + ' ' + JSON.stringify(m.toolCall.inputParameters || {})));
-          else if (m.liveAgentHandoff) log.append(h('div', { class: 'bubble sys' }, '→ live agent handoff'));
-          else if (m.endInteraction) log.append(h('div', { class: 'bubble sys' }, '— conversation ended —'));
+          if (m.text) parts.push(h('div', { class: 'bubble bot' }, m.text.text.join(' ')));
+          else if (m.payload && m.payload.richContent) parts.push(h('div', { class: 'chips-row' }, m.payload.richContent.flat().filter(x => x.type === 'chips').flatMap(x => x.options || []).map(o => h('button', { class: 'chip-btn', onclick: () => { input.value = o.text; send(); } }, o.text))));
+          else if (m.payload) parts.push(h('div', { class: 'bubble bot' }, h('code', null, JSON.stringify(m.payload))));
+          else if (m.toolCall) parts.push(h('div', { class: 'bubble sys' }, icon('tool', 14), ' client tool call: ' + idOf(m.toolCall.tool) + ' ' + JSON.stringify(m.toolCall.inputParameters || {})));
+          else if (m.liveAgentHandoff) parts.push(h('div', { class: 'bubble sys' }, icon('external', 14), ' live agent handoff'));
+          else if (m.endInteraction) parts.push(h('div', { class: 'bubble sys' }, 'conversation ended'));
         }
-        log.append(h('div', { class: 'meta', title: 'Show execution details', onclick: () => modal('Execution details', h('pre', null, JSON.stringify(qr.diagnosticInfo, null, 2)), [['Close', 'primary', () => true]]) }, metaLine(qr) + '  ⓘ'));
+        parts.push(h('button', { class: 'meta', title: 'Show execution details', onclick: () => modal('Execution details', h('pre', null, JSON.stringify(qr.diagnosticInfo, null, 2)), [['Close', 'primary', () => true]]) },
+          icon('info', 13), h('span', null, metaLine(qr)), e.ms != null ? h('span', { class: 'ms' }, e.ms + ' ms') : null));
+        log.append(botRow(...parts));
       }
-      if (e.err) log.append(h('div', { class: 'bubble sys' }, '⚠ ' + e.err));
+      if (e.err) log.append(h('div', { class: 'bubble sys err' }, icon('alert', 14), ' ' + e.err));
     }
     log.scrollTop = log.scrollHeight;
   };
-  const input = h('input', { placeholder: 'Talk to your agent', onkeydown: e => { if (e.key === 'Enter') send(); } });
-  const state = h('div', { class: 'sim-state' });
+  const input = h('input', { placeholder: 'Message your agent…', 'aria-label': 'Message', enterkeyhint: 'send', onkeydown: e => { if (e.key === 'Enter') send(); } });
+  const state = h('details', { class: 'sim-state' });
   const drawState = () => {
     const qr = S.sim.state; state.innerHTML = '';
-    if (!qr) return state.append(h('span', { class: 'muted' }, 'Session parameters appear here.'));
-    state.append(h('b', null, 'Parameters'), h('pre', null, JSON.stringify(qr.parameters || {}, null, 2)));
+    const n = qr ? Object.keys(qr.parameters || {}).length : 0;
+    state.append(h('summary', null, icon('code', 14), ` Session parameters (${n})`));
+    state.append(qr ? h('pre', null, JSON.stringify(qr.parameters || {}, null, 2)) : h('div', { class: 'muted' }, 'Parameters appear after the first turn.'));
   };
   async function send(body) {
     const text = input.value; if (!body && !text.trim()) return;
     input.value = '';
     const base = S.sim.env ? S.sim.env : S.agent;
-    const entry = { user: body ? null : text }; S.sim.log.push(entry); drawLog();
+    const entry = { user: body ? null : text, pending: true }; S.sim.log.push(entry); drawLog();
+    const t0 = performance.now();
     try {
       const resp = await api.post(`${base}/sessions/${S.sim.session}:detectIntent`, body || { queryInput: { text: { text }, languageCode: (S.agentRes || {}).defaultLanguageCode || 'en' } });
-      entry.resp = resp; S.sim.state = resp.queryResult;
+      entry.resp = resp; entry.ms = Math.round(performance.now() - t0); S.sim.state = resp.queryResult;
     } catch (e) { entry.err = e.message; }
+    entry.pending = false;
     drawLog(); drawState(); input.focus();
   }
   function resetSim() { S.sim.session = null; S.sim.log = []; S.sim.state = null; renderSim(); }
-  const evBtn = h('button', { class: 'btn small', onclick: async () => { const ev = prompt('Event name', 'sys.no-input-default'); if (ev) { S.sim.log.push({ user: '[event] ' + ev }); await send({ queryInput: { event: { event: ev } } }); S.sim.log.splice(S.sim.log.length - 2, 1); drawLog(); } } }, 'Event');
-  const saveBtn = h('button', { class: 'btn small', onclick: async () => { const n = prompt('Test case name', 'Simulator conversation'); if (!n) return; const r = await guard(() => api.post(S.agent + ':saveTestCase', { session: (S.sim.env || S.agent) + '/sessions/' + S.sim.session, displayName: n }), 'Saved as test case'); if (r) go('/' + r.name); } }, 'Save as test');
-  sim.append(h('div', { class: 'sim-head' }, h('div', { class: 'row between' }, h('b', null, 'Simulator'), h('div', { class: 'row' }, evBtn, saveBtn, h('button', { class: 'btn small', onclick: resetSim }, 'Reset'), h('button', { class: 'btn small ghost', onclick: () => { S.sim.open = false; renderSim(); } }, '✕'))),
-    h('div', { class: 'row', style: 'margin-top:6px' }, h('span', { class: 'muted' }, 'Environment'), envSel)), log, state, h('div', { class: 'sim-input' }, input, h('button', { class: 'btn primary', onclick: () => send() }, 'Send')));
+  const evBtn = h('button', { class: 'iconbtn small', title: 'Send an event', 'aria-label': 'Send an event', onclick: async () => { const ev = prompt('Event name', 'sys.no-input-default'); if (ev) { S.sim.log.push({ user: '[event] ' + ev }); await send({ queryInput: { event: { event: ev } } }); S.sim.log.splice(S.sim.log.length - 2, 1); drawLog(); } } }, icon('bolt', 18));
+  const saveBtn = h('button', { class: 'iconbtn small', title: 'Save conversation as a test case', 'aria-label': 'Save as test case', onclick: async () => { const n = prompt('Test case name', 'Simulator conversation'); if (!n) return; const r = await guard(() => api.post(S.agent + ':saveTestCase', { session: (S.sim.env || S.agent) + '/sessions/' + S.sim.session, displayName: n }), 'Saved as test case'); if (r) go('/' + r.name); } }, icon('flask', 18));
+  sim.append(
+    h('div', { class: 'sim-head' },
+      h('div', { class: 'sim-title' }, avatar((S.agentRes || {}).displayName, (S.agentRes || {}).startPlaybook ? 'sparkles' : 'bot'), h('div', null, h('b', null, (S.agentRes || {}).displayName || 'Simulator'), h('small', { class: 'muted' }, 'Simulator'))),
+      h('div', { class: 'row tight' }, evBtn, saveBtn,
+        h('button', { class: 'iconbtn small', title: 'New session', 'aria-label': 'Reset conversation', onclick: resetSim }, icon('refresh', 18)),
+        h('button', { class: 'iconbtn small', title: 'Close', 'aria-label': 'Close simulator', onclick: () => { S.sim.open = false; renderSim(); } }, icon('x', 18)))),
+    h('div', { class: 'sim-env' }, icon('layers', 14), h('span', { class: 'muted' }, 'Environment'), envSel),
+    log, state,
+    h('div', { class: 'sim-input' }, input, h('button', { class: 'send-btn', 'aria-label': 'Send', onclick: () => send() }, icon('send', 18))));
   drawLog(); drawState(); input.focus();
 }

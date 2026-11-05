@@ -125,10 +125,54 @@ pub fn seed(store: &store::Store, seeds: &[(String, cx_core::Value)]) {
     store.persist(&d);
 }
 
+#[cfg(unix)]
+mod shutdown {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    pub static REQUESTED: AtomicBool = AtomicBool::new(false);
+    extern "C" {
+        fn signal(signum: i32, handler: extern "C" fn(i32)) -> usize;
+    }
+    extern "C" fn on_signal(_: i32) {
+        // Only async-signal-safe work here: set a flag.
+        REQUESTED.store(true, Ordering::SeqCst);
+    }
+    /// SIGTERM (Cloud Run / Kubernetes shutdown) and SIGINT (Ctrl-C).
+    pub fn install() {
+        unsafe {
+            signal(15, on_signal);
+            signal(2, on_signal);
+        }
+    }
+}
+
+/// Flushes the store and exits when SIGTERM/SIGINT arrives, so redeploys and
+/// scale-down never lose the last writes.
+fn watch_shutdown(store: Arc<store::Store>) {
+    #[cfg(unix)]
+    {
+        shutdown::install();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            if shutdown::REQUESTED.load(std::sync::atomic::Ordering::SeqCst) {
+                eprintln!("shutdown requested: flushing state");
+                if let Err(e) = store.flush() {
+                    eprintln!("final flush failed: {}", e);
+                }
+                std::process::exit(0);
+            }
+        });
+    }
+    #[cfg(not(unix))]
+    let _ = store;
+}
+
 /// Runs the platform server (blocking).
 pub fn run(cfg: Config) -> Result<(), String> {
     let store = Arc::new(store::Store::open(cfg.data_file.clone())?);
     seed(&store, &cfg.seeds);
+    let _ = store.flush();
+    store.start_flusher(std::time::Duration::from_millis(300));
+    watch_shutdown(store.clone());
     let api = Arc::new(Api::new(store, cfg.runtime));
     let server = Server::bind(&cfg.addr).map_err(|e| format!("bind {}: {}", cfg.addr, e))?;
     eprintln!("Conversational Agents platform listening on http://{}", server.addr);

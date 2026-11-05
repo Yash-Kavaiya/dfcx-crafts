@@ -31,3 +31,22 @@ jobs:
           curl -fsS -X POST localhost:8080/v3/projects/demo/locations/global/agents/rusty-pizza/sessions/ci:detectIntent \
             -H 'Content-Type: application/json' -d '{"queryInput":{"text":{"text":"hi"}}}' | grep -q "Rusty Pizza"
           docker logs cxa
+
+  e2e:
+    # Drives every console feature in Chromium (desktop + phone) against the
+    # real server, plus a latency budget and API-key mode.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: cargo build --release --locked -p cxa
+      - name: Install Playwright
+        working-directory: e2e
+        run: |
+          npm install --no-package-lock --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: End-to-end tests
+        run: node e2e/console.e2e.mjs

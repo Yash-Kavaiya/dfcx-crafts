@@ -5,6 +5,7 @@
 //! helpers, random UUIDs and resource-name helpers.
 
 pub mod base64;
+pub mod deflate;
 pub mod json;
 pub mod name;
 pub mod time;

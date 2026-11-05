@@ -229,6 +229,40 @@ fn write_response(stream: &mut TcpStream, resp: &Response, keep_alive: bool, hea
 
 pub type Handler = dyn Fn(&Request) -> Response + Send + Sync;
 
+/// Whether the client accepts gzip (`Accept-Encoding`, honouring `q=0`).
+pub fn accepts_gzip(req: &Request) -> bool {
+    req.header("Accept-Encoding").map_or(false, |v| {
+        v.split(',').any(|part| {
+            let mut it = part.split(';');
+            let enc = it.next().unwrap_or("").trim();
+            let q0 = it.any(|p| p.trim().replace(' ', "") == "q=0");
+            (enc.eq_ignore_ascii_case("gzip") || enc == "*") && !q0
+        })
+    })
+}
+
+fn compressible(content_type: &str) -> bool {
+    let ct = content_type.to_ascii_lowercase();
+    ct.starts_with("text/") || ct.contains("json") || ct.contains("javascript") || ct.contains("svg") || ct.contains("xml")
+}
+
+/// Compresses text responses of 1 KiB or more for gzip-capable clients.
+fn maybe_gzip(req: &Request, mut resp: Response) -> Response {
+    if resp.body.len() < 1024 || resp.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("Content-Encoding")) {
+        return resp;
+    }
+    let ct = resp.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("Content-Type")).map(|(_, v)| v.clone()).unwrap_or_default();
+    if !compressible(&ct) {
+        return resp;
+    }
+    resp.headers.push(("Vary".into(), "Accept-Encoding".into()));
+    if accepts_gzip(req) {
+        resp.body = cx_core::deflate::gzip(&resp.body);
+        resp.headers.push(("Content-Encoding".into(), "gzip".into()));
+    }
+    resp
+}
+
 fn handle_conn(stream: TcpStream, handler: Arc<Handler>) {
     let remote = stream.peer_addr().ok();
     let _ = stream.set_read_timeout(Some(Duration::from_secs(60)));
@@ -282,6 +316,7 @@ fn handle_conn(stream: TcpStream, handler: Arc<Handler>) {
             Ok(r) => r,
             Err(_) => Response::json(500, r#"{"error":{"code":500,"message":"internal error","status":"INTERNAL"}}"#),
         };
+        let resp = maybe_gzip(&req, resp);
         if write_response(&mut writer, &resp, keep_alive, method == "HEAD").is_err() || !keep_alive {
             return;
         }
@@ -434,6 +469,25 @@ mod tests {
         assert_eq!(parse_url("https://example.com").unwrap().port, 443);
         assert_eq!(percent_decode("a%20b+c"), "a b c");
         assert_eq!(parse_query("a=1&b=x%2Fy"), vec![("a".into(), "1".into()), ("b".into(), "x/y".into())]);
+    }
+
+    #[test]
+    fn gzip_negotiation() {
+        let server = Server::bind("127.0.0.1:0").unwrap();
+        let big = "x".repeat(5000);
+        let body = big.clone();
+        let addr = server.spawn(Arc::new(move |_r: &Request| Response::json(200, format!("{{\"v\":\"{}\"}}", body))));
+        let url = format!("http://{}/", addr);
+        let plain = request("GET", &url, &[], b"", Duration::from_secs(5)).unwrap();
+        assert!(!plain.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-encoding")));
+        assert_eq!(plain.body.len(), big.len() + 8);
+        let gz = request("GET", &url, &[("Accept-Encoding".into(), "br, gzip;q=0.8".into())], b"", Duration::from_secs(5)).unwrap();
+        assert!(gz.headers.iter().any(|(k, v)| k.eq_ignore_ascii_case("content-encoding") && v == "gzip"));
+        assert!(gz.body.len() < 200, "{}", gz.body.len());
+        let inflated = cx_core::zip::inflate(&gz.body[10..gz.body.len() - 8], 10_000).unwrap();
+        assert_eq!(inflated, plain.body);
+        let refused = request("GET", &url, &[("Accept-Encoding".into(), "gzip;q=0".into())], b"", Duration::from_secs(5)).unwrap();
+        assert!(!refused.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("content-encoding")));
     }
 
     #[test]

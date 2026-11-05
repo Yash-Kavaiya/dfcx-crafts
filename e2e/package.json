@@ -1,0 +1,12 @@
+{
+  "name": "cxa-e2e",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end browser tests for the Conversational Agents console",
+  "scripts": {
+    "test": "node console.e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

@@ -61,6 +61,7 @@ and every agent can be exported, imported into another project, or restored.
 
 | Area | What works |
 |---|---|
+| **Performance** | Server-side chat turns in well under 1 ms. State writes happen off the request path (debounced, flushed on SIGTERM). gzip for API and assets, content-hashed immutable console assets, one warm Cloud Run instance with startup CPU boost. Every simulator turn shows its round-trip time |
 | **Console** | Projects and agents across locations, flow graph, page/form/route editors, intents with inline `[annotation](param)`, entity types, webhooks, route groups, generators, playbooks and examples, tools, test cases with diffs and coverage, environments and flow versions, validation, conversation and change history, agent settings, import/export/restore, simulator (environments, events, execution trace, "save as test case"), dark mode |
 | **Flows & pages** | Start page, flow-level and page-level routes, intent and condition routes, the CX handler scope and evaluation order, route groups (flow and agent level), the flow stack with `END_FLOW` returning to the calling page, `END_SESSION`, `PREVIOUS_PAGE`, `CURRENT_PAGE`, `START_PAGE`, `END_FLOW_WITH_HUMAN_ESCALATION` (adds `liveAgentHandoff`), loop protection |
 | **Forms** | Required/optional and list parameters, default values, initial prompts, reprompt handlers (`sys.no-match-N`), filling several parameters from one utterance, intent parameters pre-filling forms, `$page.params.status = "FINAL"` |
@@ -211,4 +212,10 @@ clients should feel familiar.
 ```
 cargo test             # unit and integration tests (engine conversations, HTTP platform lifecycle)
 cargo build --release
+cd e2e && npm install && npx playwright install chromium && cd ..
+node e2e/console.e2e.mjs   # 18 browser checks: every console feature, phone layout, latency budget, API-key mode
 ```
+
+The console is responsive. On phones the navigation becomes a drawer, lists
+become cards, and the simulator becomes a full-screen sheet. It has light
+and dark themes, with a manual toggle.
